@@ -10,7 +10,7 @@
   "data": {
     "cat" : "srn_cars",
     "splits": "cars_train",
-    "data_dir": "../data/ShapeNet_SRN"
+    "data_dir": "/mnt/LinuxDataFast/Datasets/ShapeNet_SRN"
   },
   "N_samples": 96,
   "near": 0.8,

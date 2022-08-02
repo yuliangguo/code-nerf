@@ -31,11 +31,11 @@ class Trainer():
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
 
-
     def training(self, iters_crop, iters_all, num_instances_per_obj=1):
         if iters_crop > iters_all:
-            raise error
+            raise os.error
         while self.niter < iters_all:
+            print(f'epoch: {self.nepoch}')
             if self.niter < iters_crop:
                 self.training_single_epoch(num_instances_per_obj = num_instances_per_obj,
                                            num_iters = iters_crop, crop_img = True)
@@ -53,6 +53,7 @@ class Trainer():
         # per object
         for d in self.dataloader:
             if self.niter < num_iters:
+                print(f'iter {self.niter} / {num_iters}')
                 focal, H, W, imgs, poses, instances, obj_idx = d
                 obj_idx = obj_idx.to(self.device)
                 # per image

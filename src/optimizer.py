@@ -45,13 +45,9 @@ class Optimizer():
         self.psnr_opt = {}
         self.ssim_eval = {}
 
-
     def optimize_objs(self, instance_ids, lr=1e-2, lr_half_interval=50, save_img = True):
         logpath = os.path.join(self.save_dir, 'opt_hpams.json')
-        hpam = {'instance_ids' : instance_ids, 'lr': lr, 'lr_half_interval': lr_half_interval,
-                '
-                
-                ': self.splits}
+        hpam = {'instance_ids' : instance_ids, 'lr': lr, 'lr_half_interval': lr_half_interval, '': self.splits}
         with open(logpath, 'w') as f:
             json.dump(hpam, f, indent=2)
 
@@ -61,6 +57,7 @@ class Optimizer():
         self.optimized_texturecodes = torch.zeros(len(self.dataloader), self.mean_texture.shape[1])
         # Per object
         for num_obj, d in enumerate(self.dataloader):
+            print(f'num obj: {num_obj}/{len(self.dataloader)}')
             focal, H, W, imgs, poses, obj_idx = d
             tgt_imgs, tgt_poses = imgs[0, instance_ids], poses[0, instance_ids]
             self.nopts, self.lr_half_interval = 0, lr_half_interval
