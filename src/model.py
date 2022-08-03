@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 
 def PE(x, degree):
+    """
+    Positional encoding
+    """
     y = torch.cat([2.**i * x for i in range(degree)], -1)
     w = 1
     return torch.cat([x] + [torch.sin(y) * w, torch.cos(y) * w], -1)

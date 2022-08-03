@@ -38,7 +38,7 @@ class Trainer():
             print(f'epoch: {self.nepoch}')
             if self.niter < iters_crop:
                 self.training_single_epoch(num_instances_per_obj = num_instances_per_obj,
-                                           num_iters = iters_crop, crop_img = True)
+                                           num_iters=iters_crop, crop_img = True)
             else:
                 self.training_single_epoch(num_instances_per_obj=num_instances_per_obj,
                                            num_iters=iters_all, crop_img = False)
@@ -46,6 +46,7 @@ class Trainer():
             self.nepoch += 1
 
     def training_single_epoch(self, num_instances_per_obj, num_iters, crop_img = True):
+        # TODO: change num_iters
         # single epoch here means that it iterates over whole objects
         # only 1 or a few images are chosen for each epoch
         self.make_dataloader(num_instances_per_obj, crop_img = crop_img)

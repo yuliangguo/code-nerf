@@ -2,6 +2,7 @@
 import imageio
 import numpy as np
 import torch
+import argparse
 # import json
 # from torchvision import transforms
 import os
@@ -18,8 +19,11 @@ def get_rays(H, W, focal, c2w):
     rays_o, viewdirs = rays_o.reshape(-1, 3), viewdirs.reshape(-1, 3)
     return rays_o, viewdirs
 
+
 def sample_from_rays(ro, vd, near, far, N_samples, z_fixed = False):
     # Given ray centre (camera location), we sample z_vals
+    # TODO: this type of sampling might be limited to the camera view facing the object center.
+    #  The samples from rays away from the image center can be very sparse
     # we do not use ray_o here - just number of rays
     if z_fixed:
         z_vals = torch.linspace(near, far, N_samples).type_as(ro)
@@ -30,6 +34,7 @@ def sample_from_rays(ro, vd, near, far, N_samples, z_fixed = False):
     xyz = ro.unsqueeze(-2) + vd.unsqueeze(-2) * z_vals.unsqueeze(-1)
     vd = vd.unsqueeze(-2).repeat(1,N_samples,1)
     return xyz, vd, z_vals
+
 
 def volume_rendering(sigmas, rgbs, z_vals, white_bg = True):
     deltas = z_vals[1:] - z_vals[:-1]
@@ -45,6 +50,7 @@ def volume_rendering(sigmas, rgbs, z_vals, white_bg = True):
         weights_sum = weights.sum(1)
         rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
     return rgb_final, depth_final
+
 
 def image_float_to_uint8(img):
     """
