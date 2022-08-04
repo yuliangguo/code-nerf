@@ -13,7 +13,7 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", default=0)
     arg_parser.add_argument("--saved_dir", dest="saved_dir", default='srncar')
-    arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[1],
+    arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[0],
                             help="the ids of the instances used for optimization, evaluation applis on the rest")
     arg_parser.add_argument("--splits", dest="splits", default='test')
     arg_parser.add_argument("--num_opts", dest="num_opts", default=200)

@@ -154,7 +154,7 @@ class Optimizer():
         instance_ids = torch.tensor(instance_ids)
         self.optimized_shapecodes = torch.zeros(len(self.dataloader), self.mean_shape.shape[1])
         self.optimized_texturecodes = torch.zeros(len(self.dataloader), self.mean_texture.shape[1])
-        self.optimized_poses = torch.zeros(len(self.dataloader), len(instance_ids), 6)
+        self.optimized_poses = torch.zeros(len(self.dataloader), len(instance_ids), 3, 4)
 
         # Per object
         for num_obj, d in enumerate(self.dataloader):
@@ -163,36 +163,42 @@ class Optimizer():
             tgt_imgs, tgt_poses = imgs[0, instance_ids], poses[0, instance_ids]
             # create error pose to optimize
             rot_mat_gt = tgt_poses[:, :3, :3]
-            t_vec_gt = tgt_poses[:, :3, 3:]
+            t_vec_gt = tgt_poses[:, :3, 3]
             euler_angles_gt = rot_trans.matrix_to_euler_angles(rot_mat_gt, 'XYZ')
 
             euler_angles = euler_angles_gt + torch.tensor([random.uniform(-0.1, 0.1),
                                                            random.uniform(-0.1, 0.1),
                                                            random.uniform(-0.1, 0.1)])
-            t_vec = t_vec_gt * torch.tensor(random.uniform(0.9, 1.1))
-            euler_angles.detach().requires_grad_()
-            t_vec.detach().requires_grad_()
-            rot_mat = rot_trans.euler_angles_to_matrix(euler_angles, 'XYZ')
-            poses2opt = torch.cat((rot_mat, t_vec), dim=-1)
+            t_vec = t_vec_gt * torch.tensor(random.uniform(0.99, 1.01))
+            # TODO need to solve retain graph
+            euler_angles2opt = euler_angles.clone().detach().requires_grad_()
+            t_vec2opt = t_vec.clone().detach().requires_grad_()
+            rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles2opt, 'XYZ')
+            # poses2opt = torch.cat((rot_mat2opt, t_vec2opt.unsqueeze(-1)), dim=-1)
+            poses2opt = torch.cat((rot_mat2opt, t_vec2opt.unsqueeze(-1)), dim=-1).detach().requires_grad_()
 
             self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.mean_shape.to(self.device).clone().detach().requires_grad_()
             texturecode = self.mean_texture.to(self.device).clone().detach().requires_grad_()
 
-            # First Optimize
-            self.set_optimizers(shapecode, texturecode)
+            # First Optimize from random sampled rays to save memory
+            # self.set_optimizers(shapecode, texturecode)
+            self.set_optimizers_w_pose(shapecode, texturecode, poses2opt)
+            # self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles2opt, t_vec2opt)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
                 t1 = time.time()
                 generated_imgs, gt_imgs = [], []
                 for num, instance_id in enumerate(instance_ids):
                     tgt_img = tgt_imgs[num].reshape(-1, 3)
-                    pose2opt = poses2opt[num]
-                    rays_o, viewdir = get_rays(H.item(), W.item(), focal, pose2opt)
-                    # # extract a random subset to save memory
-                    # random_ray_ids = np.random.permutation(rays_o.shape[0])[:2*self.B]
-                    # rays_o = rays_o[random_ray_ids]
-                    # viewdir = viewdir[random_ray_ids]
+                    rays_o, viewdir = get_rays(H.item(), W.item(), focal, poses2opt[num])
+
+                    # extract a random subset of pixels to save memory, avoid graph retain issue in loop
+                    random_ray_ids = np.random.permutation(rays_o.shape[0])[:2*self.B]
+                    rays_o = rays_o[random_ray_ids]
+                    viewdir = viewdir[random_ray_ids]
+                    tgt_img = tgt_img[random_ray_ids]
+
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                             self.hpams['N_samples'])
                     loss_per_img, generated_img = [], []
@@ -208,22 +214,49 @@ class Optimizer():
                             reg_loss = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                             loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
                             loss = loss_l2 + loss_reg
+                            loss_tot = loss
                         else:
                             loss = loss_l2
-                        loss.backward()
+                            loss_tot += loss
+                        # loss.backward()  # this would cause graph retain issue
                         loss_per_img.append(loss_l2.item())
-                        generated_img.append(rgb_rays)
-                    generated_imgs.append(torch.cat(generated_img).reshape(H,W,3))
-                    gt_imgs.append(tgt_img.reshape(H,W,3))
+                    loss_tot.backward()
+                    gt_imgs.append(tgt_imgs[num])
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * num_obj,
                                        num_obj)
                 self.log_regloss(reg_loss.item(), self.nopts, num_obj)
+
                 if save_img:
+                    # generate the full images
+                    with torch.no_grad():
+                        for num, instance_id in enumerate(instance_ids):
+                            rays_o, viewdir = get_rays(H.item(), W.item(), focal, poses2opt[num])
+                            xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'],
+                                                                    self.hpams['far'],
+                                                                    self.hpams['N_samples'])
+                            generated_img = []
+                            for i in range(0, xyz.shape[0], self.B):
+                                sigmas, rgbs = self.model(xyz[i:i + self.B].to(self.device),
+                                                          viewdir[i:i + self.B].to(self.device),
+                                                          shapecode, texturecode)
+                                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+                                generated_img.append(rgb_rays)
+                            generated_imgs.append(torch.cat(generated_img).reshape(H, W, 3))
                     self.save_img(generated_imgs, gt_imgs, self.ids[num_obj], self.nopts)
+                # TODO: save optimized poses, need to apply to all the camera poses in a consistent way
+                # self.optimized_poses[num_obj, ] = texturecode.detach().cpu()
+
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
-                    self.set_optimizers(shapecode, texturecode)
+                    # self.set_optimizers(shapecode, texturecode)
+                    self.set_optimizers_w_pose(shapecode, texturecode, poses2opt)
+                    # self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles2opt, t_vec2opt)
+
+            # Save the optimized codes
+            self.optimized_shapecodes[num_obj] = shapecode.detach().cpu()
+            self.optimized_texturecodes[num_obj] = texturecode.detach().cpu()
+            self.save_opts(num_obj)
 
             # Then, Evaluate
             with torch.no_grad():
@@ -231,6 +264,7 @@ class Optimizer():
                 for num in range(250):
                     if num not in instance_ids:
                         tgt_img, tgt_pose = imgs[0,num].reshape(-1,3), poses[0, num]
+                        # TODO: use optimized poses to visualize here
                         rays_o, viewdir = get_rays(H.item(), W.item(), focal, poses[0, num])
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                                self.hpams['N_samples'])
@@ -250,10 +284,7 @@ class Optimizer():
                             self.save_img([torch.cat(generated_img).reshape(H,W,3)], [tgt_img.reshape(H,W,3)], self.ids[num_obj], num,
                                           opt=False)
 
-            # Save the optimized codes
-            self.optimized_shapecodes[num_obj] = shapecode.detach().cpu()
-            self.optimized_texturecodes[num_obj] = texturecode.detach().cpu()
-            self.save_opts(num_obj)
+
 
     def save_opts(self, num_obj):
         saved_dict = {
@@ -290,14 +321,16 @@ class Optimizer():
         generated_img_np = generated_img.detach().cpu().numpy()
         gt_img_np = gt_img.detach().cpu().numpy()
         ssim = compute_ssim(generated_img_np, gt_img_np, multichannel=True)
-        if niters == 0:
+        # if niters == 0:
+        if self.ssim_eval.get(obj_idx) is None:
             self.ssim_eval[obj_idx] = [ssim]
         else:
             self.ssim_eval[obj_idx].append(ssim)
 
     def log_eval_psnr(self, loss_per_img, niters, obj_idx):
         psnr = -10 * np.log(loss_per_img) / np.log(10)
-        if niters == 0:
+        # if niters == 0:
+        if self.psnr_eval.get(obj_idx) is None:
             self.psnr_eval[obj_idx] = [psnr]
         else:
             self.psnr_eval[obj_idx].append(psnr)
@@ -316,6 +349,25 @@ class Optimizer():
         self.opts = torch.optim.AdamW([
             {'params': shapecode, 'lr': lr},
             {'params': texturecode, 'lr':lr}
+        ])
+
+    def set_optimizers_w_pose(self, shapecode, texturecode, poses):
+        lr = self.get_learning_rate()
+        #print(lr)
+        self.opts = torch.optim.AdamW([
+            {'params': shapecode, 'lr': lr},
+            {'params': texturecode, 'lr': lr},
+            {'params': poses, 'lr': lr},
+        ])
+
+    def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans):
+        lr = self.get_learning_rate()
+        #print(lr)
+        self.opts = torch.optim.AdamW([
+            {'params': shapecode, 'lr': lr},
+            {'params': texturecode, 'lr': lr},
+            {'params': euler_angles, 'lr': lr},
+            {'params': trans, 'lr': lr}
         ])
 
     def get_learning_rate(self):
