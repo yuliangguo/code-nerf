@@ -16,7 +16,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[0],
                             help="the ids of the instances used for optimization, evaluation applis on the rest")
     arg_parser.add_argument("--splits", dest="splits", default='test')
-    arg_parser.add_argument("--num_opts", dest="num_opts", default=200)
+    arg_parser.add_argument("--num_opts", dest="num_opts", default=300)
     arg_parser.add_argument("--lr", dest="lr", default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", default=50)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)

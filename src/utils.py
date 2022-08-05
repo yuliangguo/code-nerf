@@ -75,3 +75,9 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def rot_dist(R1, R2):
+    R_diff = torch.matmul(R1, torch.transpose(R2, 1, 2))
+    trace = torch.tensor([torch.trace(R_diff_single) for R_diff_single in R_diff])
+    return torch.acos((trace-1) / 2)
