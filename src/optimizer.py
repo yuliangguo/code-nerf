@@ -145,9 +145,9 @@ class Optimizer():
             optimize both obj codes and poses
             Simulate pose errors
             pose_mode:
-                0: Simplified camera model facing object center
+                0: Simplified camera model facing object center (TODO)
                 1: Euler angles
-                2: Unit quaternion
+                2: Unit quaternion (TODO)
         """
         logpath = os.path.join(self.save_dir, 'opt_hpams.json')
         hpam = {'instance_ids': instance_ids, 'lr': lr, 'lr_half_interval': lr_half_interval, '': self.splits}
@@ -172,7 +172,7 @@ class Optimizer():
             t_vec_gt = tgt_poses[:, :3, 3]
             euler_angles_gt = rot_trans.matrix_to_euler_angles(rot_mat_gt, 'XYZ')
 
-            # TODO: if to optimize the object pose from multiple cameras, need to BP to a single pose perturbation
+            # To optimize the object pose from multiple cameras, need to BP to a single pose perturbation
             angle_pert = torch.tensor([random.uniform(-self.max_rot_pert, self.max_rot_pert),
                                        random.uniform(-self.max_rot_pert, self.max_rot_pert),
                                        random.uniform(-self.max_rot_pert, self.max_rot_pert)]).requires_grad_()
@@ -191,14 +191,15 @@ class Optimizer():
             # self.set_optimizers_w_pose(shapecode, texturecode, poses2opt)
             # self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles2opt, t_vec2opt)
             self.set_optimizers_w_euler_poses(shapecode, texturecode, angle_pert, trans_pert)
+            optimized_poses = torch.zeros((len(instance_ids), 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
                 t1 = time.time()
-                generated_imgs, gt_imgs = [], []
-                optimized_poses = []
+                gt_imgs = []
+                loss_per_img = []
                 for num, instance_id in enumerate(instance_ids):
                     tgt_img = tgt_imgs[num].reshape(-1, 3)
-                    # ATTENTION: construct the graph from
+                    # ATTENTION: construct the graph inside loop to avoid graph retain issue
                     # euler_angle2opt = euler_angles2opt[num]
                     # t2opt = t_vec2opt[num].unsqueeze(-1)
                     euler_angle2opt = euler_angles_gt[num] + angle_pert
@@ -207,37 +208,29 @@ class Optimizer():
                     pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
                     rays_o, viewdir = get_rays(H.item(), W.item(), focal, pose2opt)
 
-                    # extract a random subset of pixels to save memory, avoid graph retain issue in loop
-                    # TODO: make the number of sampled rays a variable input
-                    random_ray_ids = np.random.permutation(rays_o.shape[0])[:2*self.B]
+                    # extract a random subset of pixels (batch size) to save memory, avoided graph retain issue in loop
+                    n_rays = np.minimum(rays_o.shape[0], self.B)
+                    random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                     rays_o = rays_o[random_ray_ids]
                     viewdir = viewdir[random_ray_ids]
                     tgt_img = tgt_img[random_ray_ids]
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                             self.hpams['N_samples'])
-                    loss_per_img, generated_img = [], []
-                    loss_tot = 0
-                    for i in range(0, xyz.shape[0], self.B):
-                        sigmas, rgbs = self.model(xyz[i:i+self.B].to(self.device),
-                                                  viewdir[i:i+self.B].to(self.device),
-                                                  shapecode, texturecode)
-                        rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                        #print(rgb_rays.shape, tgt_img.shape)
-                        loss_l2 = torch.mean((rgb_rays - tgt_img[i:i+self.B].type_as(rgb_rays))**2)
-                        if i == 0:
-                            reg_loss = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                            loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                            loss = loss_l2 + loss_reg
-                            loss_tot = loss
-                        else:
-                            loss = loss_l2
-                            loss_tot += loss
-                        # loss.backward()  # this would cause graph retain issue
-                        loss_per_img.append(loss_l2.item())
-                    loss_tot.backward()
+
+                    sigmas, rgbs = self.model(xyz.to(self.device),
+                                              viewdir.to(self.device),
+                                              shapecode, texturecode)
+                    rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+                    loss_l2 = torch.mean((rgb_rays - tgt_img.type_as(rgb_rays))**2)
+                    reg_loss = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
+                    loss = loss_l2 + loss_reg
+                    loss.backward()
+                    loss_per_img.append(loss_l2.item())
                     gt_imgs.append(tgt_imgs[num])
-                    optimized_poses.append(pose2opt)
+                    optimized_poses[num] = pose2opt
+
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * num_obj,
                                        num_obj)
@@ -245,6 +238,7 @@ class Optimizer():
 
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
                     # generate the full images
+                    generated_imgs = []
                     with torch.no_grad():
                         for num, instance_id in enumerate(instance_ids):
                             rays_o, viewdir = get_rays(H.item(), W.item(), focal, optimized_poses[num])
@@ -266,27 +260,23 @@ class Optimizer():
                     # self.set_optimizers_w_pose(shapecode, texturecode, poses2opt)
                     # self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles2opt, t_vec2opt)
                     self.set_optimizers_w_euler_poses(shapecode, texturecode, angle_pert, trans_pert)
-                # optimized_poses = torch.cat([opt_pose.unsqueeze(0) for opt_pose in optimized_poses]).detach().cpu()
-                # self.log_eval_pose(optimized_poses, tgt_poses, num_obj)
-                # print(f'obj: {num_obj}, R errors: {self.R_eval[num_obj]} rad, T errors: {self.T_eval[num_obj]} m')
 
             # Save the optimized codes
             self.optimized_shapecodes[num_obj] = shapecode.detach().cpu()
             self.optimized_texturecodes[num_obj] = texturecode.detach().cpu()
-            optimized_poses = torch.cat([opt_pose.unsqueeze(0) for opt_pose in optimized_poses]).detach().cpu()
+            optimized_poses = optimized_poses.detach().cpu()
             self.optimized_poses[num_obj] = optimized_poses
-            self.save_opts_w_pose(num_obj)
             # pose error metric
             self.log_eval_pose(optimized_poses[0:1], tgt_poses[0:1], num_obj)
             R_eval_all.append(self.R_eval[num_obj][0].numpy())
             T_eval_all.append(self.T_eval[num_obj][0].numpy())
             print(f'obj: {num_obj}, R errors: {self.R_eval[num_obj]} rad, T errors: {self.T_eval[num_obj]} m')
+            self.save_opts_w_pose(num_obj)
 
             if eval_pose_only:
                 continue
             # Then, Evaluate image reconstruction
             with torch.no_grad():
-                #print(tgt_poses.shape)
                 for num in range(250):
                     if num not in instance_ids:
                         tgt_img, tgt_pose = imgs[0,num].reshape(-1,3), poses[0, num]
@@ -295,6 +285,7 @@ class Optimizer():
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                                self.hpams['N_samples'])
                         loss_per_img, generated_img = [], []
+                        # TODO: it requires self.B is a divisor of xyz.shape[0]
                         for i in range(0, xyz.shape[0], self.B):
                             sigmas, rgbs = self.model(xyz[i:i+self.B].to(self.device),
                                                       viewdir[i:i + self.B].to(self.device),
@@ -307,11 +298,10 @@ class Optimizer():
                         self.log_compute_ssim(torch.cat(generated_img).reshape(H, W, 3), tgt_img.reshape(H, W, 3),
                                               num, num_obj)
                         if save_img:
-                            self.save_img([torch.cat(generated_img).reshape(H,W,3)], [tgt_img.reshape(H,W,3)], self.ids[num_obj], num,
-                                          opt=False)
+                            self.save_img([torch.cat(generated_img).reshape(H,W,3)], [tgt_img.reshape(H,W,3)],
+                                          self.ids[num_obj], num, opt=False)
 
         print(f'Avg R error: {np.mean(np.array(R_eval_all))}, Avg T error: {np.mean(np.array(T_eval_all))}')
-
 
     def save_opts(self, num_obj):
         saved_dict = {
@@ -329,7 +319,7 @@ class Optimizer():
         saved_dict = {
             'ids': self.ids,
             'num_obj' : num_obj,
-            'optimized_shapecodes' : self.optimized_shapecodes,
+            'optimized_shapecodes': self.optimized_shapecodes,
             'optimized_texturecodes': self.optimized_texturecodes,
             'optimized_poses': self.optimized_poses,
             'psnr_eval': self.psnr_eval,
@@ -337,7 +327,7 @@ class Optimizer():
             'R_eval': self.R_eval,
             'T_eval': self.T_eval
         }
-        torch.save(saved_dict, os.path.join(self.save_dir, 'codes.pth'))
+        torch.save(saved_dict, os.path.join(self.save_dir, 'codes+poses.pth'))
         print('We finished the optimization of ' + str(num_obj))
 
     def save_img(self, generated_imgs, gt_imgs, obj_id, instance_num, opt=True):
@@ -457,7 +447,6 @@ class Optimizer():
 
         os.makedirs(save_dir_tmp)
         self.save_dir = save_dir_tmp
-        #print(self.save_dir)
 
     def make_dataloader(self, splits, num_instances_per_obj, crop_img=False):
         cat = self.hpams['data']['cat']

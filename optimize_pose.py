@@ -26,7 +26,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--save_img", dest="save_img", default=False)
     arg_parser.add_argument("--eval_pose_only", dest="eval_pose_only", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
-    arg_parser.add_argument("--batchsize", dest="batchsize", default=2048)
+    arg_parser.add_argument("--batchsize", dest="batchsize", default=4096)
 
     args = arg_parser.parse_args()
     saved_dir = args.saved_dir
