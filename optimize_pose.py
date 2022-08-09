@@ -13,7 +13,7 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", default=0)
     arg_parser.add_argument("--saved_dir", dest="saved_dir", default='srncar')
-    arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[0],
+    arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[0, 120],
                             help="the ids of the instances used for optimization, evaluation applies on the rest")
     arg_parser.add_argument("--splits", dest="splits", default='test')
     arg_parser.add_argument("--num_opts", dest="num_opts", default=200)
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     num_opts = int(args.num_opts)
     for num, i in enumerate(tgt_instances):
         tgt_instances[num] = int(i)
-    save_postfix = f'_rpert{args.max_rot_pert}_tpert{args.max_t_pert}_nops{num_opts}'
+    save_postfix = f'_rpert{args.max_rot_pert}_tpert{args.max_t_pert}_nops{num_opts}_nview{len(tgt_instances)}'
     optimizer = Optimizer(saved_dir, gpu, tgt_instances, args.splits, args.jsonfile, batchsize, num_opts,
                           args.max_rot_pert, args.max_t_pert, save_postfix)
     optimizer.optimize_objs_w_pose(tgt_instances, lr, lr_half_interval, save_img, eval_pose_only=args.eval_pose_only)
