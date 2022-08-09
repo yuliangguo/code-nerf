@@ -18,7 +18,7 @@ import pytorch3d.transforms.rotation_conversions as rot_trans
 
 class Optimizer():
     def __init__(self, saved_dir, gpu, instance_ids=[], splits='test',
-                 jsonfile = 'srncar.json', batch_size=2048, num_opts = 200):
+                 jsonfile='srncar.json', batch_size=2048, num_opts=200, max_rot_pert=0, max_t_pert=0, save_postfix=''):
         """
         :param saved_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
@@ -32,6 +32,7 @@ class Optimizer():
         hpampath = os.path.join('jsonfiles', jsonfile)
         with open(hpampath, 'r') as f:
             self.hpams = json.load(f)
+        self.save_postfix = save_postfix
         self.device = torch.device('cuda:' + str(gpu))
         self.make_model()
         self.load_model_codes(saved_dir)
@@ -47,6 +48,8 @@ class Optimizer():
         self.ssim_eval = {}
         self.R_eval = {}
         self.T_eval = {}
+        self.max_rot_pert = max_rot_pert
+        self.max_t_pert = max_t_pert
 
     def optimize_objs(self, instance_ids, lr=1e-2, lr_half_interval=50, save_img=True):
         logpath = os.path.join(self.save_dir, 'opt_hpams.json')
@@ -137,7 +140,7 @@ class Optimizer():
             self.optimized_texturecodes[num_obj] = texturecode.detach().cpu()
             self.save_opts(num_obj)
 
-    def optimize_objs_w_pose(self, instance_ids, lr=1e-2, lr_half_interval=50, save_img=True, pose_mode=0):
+    def optimize_objs_w_pose(self, instance_ids, lr=1e-2, lr_half_interval=50, save_img=True, pose_mode=0, eval_pose_only=True):
         """
             optimize both obj codes and poses
             Simulate pose errors
@@ -168,10 +171,10 @@ class Optimizer():
             euler_angles_gt = rot_trans.matrix_to_euler_angles(rot_mat_gt, 'XYZ')
 
             # TODO: if to optimize the object pose from multiple cameras, the single object is to optimize
-            euler_angles = euler_angles_gt + torch.tensor([random.uniform(-0.1, 0.1),
-                                                           random.uniform(-0.1, 0.1),
-                                                           random.uniform(-0.1, 0.1)])
-            t_vec = t_vec_gt * torch.tensor(random.uniform(0.99, 1.01))
+            euler_angles = euler_angles_gt + torch.tensor([random.uniform(-self.max_rot_pert, self.max_rot_pert),
+                                                           random.uniform(-self.max_rot_pert, self.max_rot_pert),
+                                                           random.uniform(-self.max_rot_pert, self.max_rot_pert)])
+            t_vec = t_vec_gt * torch.tensor(random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert))
             euler_angles2opt = euler_angles.clone().detach().requires_grad_()
             t_vec2opt = t_vec.clone().detach().requires_grad_()
             # rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles2opt, 'XYZ')
@@ -267,8 +270,13 @@ class Optimizer():
             optimized_poses = torch.cat([opt_pose.unsqueeze(0) for opt_pose in optimized_poses]).detach().cpu()
             self.optimized_poses[num_obj] = optimized_poses
             self.save_opts_w_pose(num_obj)
+            # pose error metric
+            self.log_eval_pose(optimized_poses, tgt_poses, num_obj)
+            print(f'obj: {num_obj}, R errors: {self.R_eval[num_obj]} rad, T errors: {self.T_eval[num_obj]} m')
 
-            # Then, Evaluate
+            if eval_pose_only:
+                continue
+            # Then, Evaluate image reconstruction
             with torch.no_grad():
                 #print(tgt_poses.shape)
                 for num in range(250):
@@ -293,9 +301,6 @@ class Optimizer():
                         if save_img:
                             self.save_img([torch.cat(generated_img).reshape(H,W,3)], [tgt_img.reshape(H,W,3)], self.ids[num_obj], num,
                                           opt=False)
-            # pose error metric
-            self.log_eval_pose(optimized_poses, tgt_poses, num_obj)
-            print(f'obj: {num_obj}, R errors: {self.R_eval[num_obj]} rad, T errors: {self.T_eval[num_obj]} m')
 
     def save_opts(self, num_obj):
         saved_dict = {
@@ -433,10 +438,10 @@ class Optimizer():
         self.writer = SummaryWriter(os.path.join('exps', saved_dir, 'test', 'runs'))
 
     def make_save_img_dir(self, save_dir):
-        save_dir_tmp = save_dir
+        save_dir_tmp = save_dir + self.save_postfix
         num = 2
         while os.path.isdir(save_dir_tmp):
-            save_dir_tmp = save_dir + '_' + str(num)
+            save_dir_tmp = save_dir + self.save_postfix + '_' + str(num)
             num += 1
 
         os.makedirs(save_dir_tmp)
@@ -452,4 +457,3 @@ class Optimizer():
                   num_instances_per_obj = num_instances_per_obj, crop_img = crop_img)
         self.ids = srn.ids
         self.dataloader = DataLoader(srn, batch_size=1, num_workers =4, shuffle = False)
-
