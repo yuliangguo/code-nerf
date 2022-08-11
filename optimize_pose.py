@@ -19,9 +19,9 @@ if __name__ == '__main__':
     arg_parser.add_argument("--num_opts", dest="num_opts", default=200)
     arg_parser.add_argument("--lr", dest="lr", default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", default=50)
-    arg_parser.add_argument("--max_rot_pert", dest="max_rot_pert", default=0.1,
+    arg_parser.add_argument("--max_rot_pert", dest="max_rot_pert", type=float, default=0.1,
                             help="the max rotation perturbation applying to object pose")
-    arg_parser.add_argument("--max_t_pert", dest="max_t_pert", default=0.1,
+    arg_parser.add_argument("--max_t_pert", dest="max_t_pert", type=float, default=0.1,
                             help="the max translation perturbation applying to object pose")
     arg_parser.add_argument("--save_img", dest="save_img", default=False)
     arg_parser.add_argument("--eval_pose_only", dest="eval_pose_only", default=True)
