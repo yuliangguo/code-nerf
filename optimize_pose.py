@@ -23,8 +23,8 @@ if __name__ == '__main__':
                             help="the max rotation perturbation applying to object pose")
     arg_parser.add_argument("--max_t_pert", dest="max_t_pert", type=float, default=0.1,
                             help="the max translation perturbation applying to object pose")
-    arg_parser.add_argument("--save_img", dest="save_img", default=False)
-    arg_parser.add_argument("--eval_pose_only", dest="eval_pose_only", default=True)
+    arg_parser.add_argument("--save_img", dest="save_img", action='store_true')
+    arg_parser.add_argument("--eval_photo", dest="eval_photo", action='store_true')
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
     arg_parser.add_argument("--batchsize", dest="batchsize", type=int, default=4096)
 
@@ -42,4 +42,4 @@ if __name__ == '__main__':
     save_postfix = f'_rpert{args.max_rot_pert}_tpert{args.max_t_pert}_nops{num_opts}_nview{len(tgt_instances)}'
     optimizer = Optimizer(saved_dir, gpu, tgt_instances, args.splits, args.jsonfile, batchsize, num_opts,
                           args.max_rot_pert, args.max_t_pert, save_postfix)
-    optimizer.optimize_objs_w_pose(tgt_instances, lr, lr_half_interval, save_img, eval_pose_only=args.eval_pose_only)
+    optimizer.optimize_objs_w_pose(tgt_instances, lr, lr_half_interval, save_img, eval_photo=args.eval_photo)

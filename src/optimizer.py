@@ -140,7 +140,7 @@ class Optimizer():
             self.optimized_texturecodes[num_obj] = texturecode.detach().cpu()
             self.save_opts(num_obj)
 
-    def optimize_objs_w_pose(self, instance_ids, lr=1e-2, lr_half_interval=50, save_img=True, pose_mode=0, eval_pose_only=True):
+    def optimize_objs_w_pose(self, instance_ids, lr=1e-2, lr_half_interval=50, save_img=True, pose_mode=0, eval_photo=True):
         """
             optimize both obj codes and poses
             Simulate pose errors
@@ -273,7 +273,7 @@ class Optimizer():
             print(f'obj: {num_obj}, R errors: {self.R_eval[num_obj]} rad, T errors: {self.T_eval[num_obj]} m')
             self.save_opts_w_pose(num_obj)
 
-            if eval_pose_only:
+            if not eval_photo:
                 continue
             # Then, Evaluate image reconstruction
             with torch.no_grad():
