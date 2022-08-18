@@ -345,9 +345,9 @@ class Optimizer():
         if not os.path.isdir(save_img_dir):
             os.makedirs(save_img_dir)
         if opt:
-            imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_' + str(instance_num) + '.png'), ret)
+            imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_{:03d}'.format(instance_num) + '.png'), ret)
         else:
-            imageio.imwrite(os.path.join(save_img_dir, str(instance_num) + '_' + self.nviews + '.png'), ret)
+            imageio.imwrite(os.path.join(save_img_dir, '{:03d}_'.format(instance_num) + self.nviews + '.png'), ret)
 
     def log_compute_ssim(self, generated_img, gt_img, niters, obj_idx):
         generated_img_np = generated_img.detach().cpu().numpy()
