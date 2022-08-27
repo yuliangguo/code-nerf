@@ -93,6 +93,7 @@ _COLORS = np.array(
     ]
 ).astype(np.float32).reshape(-1, 3)
 
+
 # label encoding based on cityscape format
 def pan2img(pan):
     # unique image encoding of a large iD int into RGB channels
@@ -122,191 +123,298 @@ def pan2ins_vis(pan, cat_id, divisor):
     return img
 
 
-def tgt_instance(pan, cat_id, box):
+def get_tgt_ins(pan, cat_id, box, divisor=1000):
     # return the instance label and pixel counts in the box
     min_x, min_y, max_x, max_y = box
     box_pan = pan[int(min_y):int(max_y), int(min_x):int(max_x)]
     ins_ids, cnts = np.unique(box_pan, return_counts=True)
     tgt_ins_id = np.where((ins_ids // divisor) == cat_id)[0]
     if len(tgt_ins_id) == 0:
-        return None, 0
+        return None, 0, 0, 0
 
     ins_ids = ins_ids[tgt_ins_id]
     cnts = cnts[tgt_ins_id]
-    max_id = np.argmax(cnts)
-    return ins_ids[max_id], cnts[max_id]
+    box_area = (max_x - min_x) * (max_y - min_y)
+
+    max_id = 0
+    box_iou = 0.0
+
+    for ii, ins_id in enumerate(ins_ids):
+        # calculate box iou with the full instance mask (aim to remove occluded case)
+        ins_y, ins_x = np.where(pan == ins_id)
+        min_x2 = np.min(ins_x)
+        max_x2 = np.max(ins_x)
+        min_y2 = np.min(ins_y)
+        max_y2 = np.max(ins_y)
+
+        x_left = max(min_x, min_x2)
+        y_top = max(min_y, min_y2)
+        x_right = min(max_x, max_x2)
+        y_bottom = min(max_y, max_y2)
+
+        if x_right < x_left or y_bottom < y_top:
+            box_iou_i = 0.0
+        else:
+            intersection = (x_right - x_left) * (y_bottom - y_top)
+            union = box_area + (max_x2 - min_x2) * (max_y2 - min_y2) - intersection
+            box_iou_i = intersection/union
+
+        if box_iou_i > box_iou:
+            max_id = ii
+            box_iou = box_iou_i
+
+    tgt_ins_id = ins_ids[max_id]
+    tgt_pixels_in_box = cnts[max_id]
+    area_ratio = float(tgt_pixels_in_box) / box_area
+    return tgt_ins_id, tgt_pixels_in_box, area_ratio, box_iou
+
+#
+# def get_tgt_ins(pan, cat_id, box, divisor=1000):
+#     # return the instance label and pixel counts in the box
+#     min_x, min_y, max_x, max_y = box
+#     box_pan = pan[int(min_y):int(max_y), int(min_x):int(max_x)]
+#     ins_ids, cnts = np.unique(box_pan, return_counts=True)
+#     tgt_ins_id = np.where((ins_ids // divisor) == cat_id)[0]
+#     if len(tgt_ins_id) == 0:
+#         return None, 0, 0, 0
+#
+#     ins_ids = ins_ids[tgt_ins_id]
+#     cnts = cnts[tgt_ins_id]
+#
+#     max_id = np.argmax(cnts)
+#     tgt_ins_id = ins_ids[max_id]
+#     tgt_pixels_in_box = cnts[max_id]
+#     box_area = (max_x - min_x) * (max_y - min_y)
+#     area_ratio = float(tgt_pixels_in_box) / box_area
+#
+#     # calculate box iou with the full instance mask (aim to remove occluded case)
+#     ins_y, ins_x = np.where(pan == tgt_ins_id)
+#     min_x2 = np.min(ins_x)
+#     max_x2 = np.max(ins_x)
+#     min_y2 = np.min(ins_y)
+#     max_y2 = np.max(ins_y)
+#
+#     x_left = max(min_x, min_x2)
+#     y_top = max(min_y, min_y2)
+#     x_right = min(max_x, max_x2)
+#     y_bottom = min(max_y, max_y2)
+#
+#     if x_right < x_left or y_bottom < y_top:
+#         return tgt_ins_id, tgt_pixels_in_box, area_ratio, 0.0
+#
+#     intersection = (x_right - x_left) * (y_bottom - y_top)
+#     union = box_area + (max_x2 - min_x2) * (max_y2 - min_y2) - intersection
+#     box_iou = intersection/union
+#     return tgt_ins_id, tgt_pixels_in_box, area_ratio, box_iou
 
 
-def load_poses(pose_dir, idxs=[]):
-    txtfiles = np.sort([os.path.join(pose_dir, f.name) for f in os.scandir(pose_dir)])
-    posefiles = np.array(txtfiles)[idxs]
-    srn_coords_trans = np.diag(np.array([1, -1, -1, 1])) # SRN dataset
-    poses = []
-    for posefile in posefiles:
-        pose = np.loadtxt(posefile).reshape(4,4)
-        poses.append(pose@srn_coords_trans)
-    return torch.from_numpy(np.array(poses)).float()
-
-def load_imgs(img_dir, idxs = []):
-    allimgfiles = np.sort([os.path.join(img_dir, f.name) for f in os.scandir(img_dir)])
-    imgfiles = np.array(allimgfiles)[idxs]
-    imgs = []
-    for imgfile in imgfiles:
-        img = imageio.imread(imgfile, pilmode='RGB')
-        img = img.astype(np.float32)
-        img /= 255.
-        imgs.append(img)
-    return torch.from_numpy(np.array(imgs))
-
-def load_intrinsic(intrinsic_path):
-    with open(intrinsic_path, 'r') as f:
-        lines = f.readlines()
-        focal = float(lines[0].split()[0])
-        H, W = lines[-1].split()
-        H, W = int(H), int(W)
-    return focal, H, W
-
-class NuScenesData():
-    def __init__(self, cat='srn_cars', splits='cars_train',
-                 data_dir='../data/ShapeNet_SRN/',
-                 num_instances_per_obj=1, crop_img=True):
+class NuScenesData:
+    def __init__(self, nusc_cat='vehicle.car',
+                 cs_cat='car',
+                 nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
+                 nusc_pan_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
+                 nvsc_version='v1.0-mini',
+                 num_cams_per_sample=1,
+                 divisor=1000,
+                 box_iou_th=0.5,
+                 mask_pixels=2500,
+                 img_h=900,
+                 img_w=1600,
+                 debug=False):
         """
-        cat: srn_cars / srn_chairs
-        split: cars_train(/test/val) or chairs_train(/test/val)
-        First, we choose the id
-        Then, we sample images (the number of instances matter)
+            Provide camera input and label per annotation per instance for the target category
+            Object 'Instance' here respects the definition from NuScene dataset.
+            Each instance of object does not go beyond a single scene.
+            Each instance contains multiple annotations from different timestamps
+            Each annotation could be projected to multiple camera inputs at the same timestamp.
         """
-        self.data_dir = os.path.join(data_dir, cat, splits)
-        self.ids = np.sort([f.name for f in os.scandir(self.data_dir)])
-        self.lenids = len(self.ids)
-        self.num_instances_per_obj = num_instances_per_obj
-        self.train = True if splits.split('_')[1] == 'train' else False
-        self.crop_img = crop_img
+        self.nusc_cat = nusc_cat
+        self.cs_cat = cs_cat
+        self.divisor = divisor
+        self.box_iou_th = box_iou_th
+        self.mask_pixels = mask_pixels
+        self.img_h = img_h
+        self.img_w = img_w
+        self.debug = debug
+
+        self.nusc_data_dir = nusc_data_dir
+        self.nusc_pan_dir = nusc_pan_dir
+        self.nusc = NuScenes(version=nvsc_version, dataroot=nusc_data_dir, verbose=True)
+        # self.nusc.list_scenes()
+        instance_all = self.nusc.instance
+        # self.tgt_instance_list = []
+        self.instokens = []
+        self.anntokens = []  # multiple anntokens can have the same instoken
+        # retrieve all the target instance
+        for instance in instance_all:
+            if self.nusc.get('category', instance['category_token'])['name'] == nusc_cat:
+                # self.tgt_instance_list.append(instance)
+                anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instance['token'])
+                for anntoken in anntokens:
+                    self.instokens.append(instance['token'])
+                    self.anntokens.append(anntoken)
+        self.lenids = len(self.anntokens)
+        print(f'{self.lenids} annotations in {self.nusc_cat} category are included in dataloader.')
+        self.num_cams_per_sample = num_cams_per_sample
 
     def __len__(self):
         return self.lenids
     
     def __getitem__(self, idx):
-        obj_id = self.ids[idx]
-        if self.train:
-            focal, H, W, imgs, poses, instances = self.return_train_data(obj_id)
-            return focal, H, W, imgs, poses, instances, idx
-        else:
-            focal, H, W, imgs, poses = self.return_test_val_data(obj_id)
-            return focal, H, W, imgs, poses, idx
-    
-    def return_train_data(self, obj_id):
-        pose_dir = os.path.join(self.data_dir, obj_id, 'pose')
-        img_dir = os.path.join(self.data_dir, obj_id, 'rgb')
-        intrinsic_path = os.path.join(self.data_dir, obj_id, 'intrinsics.txt')
-        instances = np.random.choice(50, self.num_instances_per_obj)
-        poses = load_poses(pose_dir, instances)
-        imgs = load_imgs(img_dir, instances)
-        focal, H, W = load_intrinsic(intrinsic_path)
-        if self.crop_img:
-            imgs = imgs[:,32:-32,32:-32,:]
-            H, W = H // 2, W//2
-        return focal, H, W, imgs.reshape(self.num_instances_per_obj, -1,3), poses, instances
-    
-    def return_test_val_data(self, obj_id):
-        pose_dir = os.path.join(self.data_dir, obj_id, 'pose')
-        img_dir = os.path.join(self.data_dir, obj_id, 'rgb')
-        intrinsic_path = os.path.join(self.data_dir, obj_id, 'intrinsics.txt')
-        instances = np.arange(250)
-        poses = load_poses(pose_dir, instances)
-        imgs = load_imgs(img_dir, instances)
-        focal, H, W = load_intrinsic(intrinsic_path)
-        return focal, H, W, imgs, poses
+        instoken = self.instokens[idx]
+        anntoken = self.anntokens[idx]
+        if self.debug:
+            print(f'instance: {instoken}, anntoken: {anntoken}')
+
+        # extract fixed number of qualified samples per instance
+        imgs = []
+        masks = []
+        camera_poses = []
+        camera_intrinsics = []
+        rois = []  # used to sample rays
+        valid_flags = []
+
+        # For each annotation (one annotation per timestamp) get all the sensors
+        sample_ann = self.nusc.get('sample_annotation', anntoken)
+        sample_record = self.nusc.get('sample', sample_ann['sample_token'])
+        if 'LIDAR_TOP' in sample_record['data'].keys():
+            # Figure out which camera the object is fully visible in (this may return nothing).
+            cams = [key for key in sample_record['data'].keys() if 'CAM' in key]
+            cams = np.random.permutation(cams)
+            for cam in cams:
+                if self.debug:
+                    print(f'     cam{cam}')
+                # TODO: should it consider BoxVisibility.ANY?
+                data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(sample_record['data'][cam],
+                                                                               box_vis_level=BoxVisibility.ALL,
+                                                                               selected_anntokens=[anntoken])
+                # TODO: compute the camera pose in object frame, make sure dataset and model definitions consistent
+                cam_pose = camera_intrinsic
+                if len(boxes) == 1:
+                    # Plot CAMERA view.
+                    img = Image.open(data_path)
+                    img = np.asarray(img)
+
+                    # visualize pred instance mask
+                    pan_file = os.path.join(self.nusc_pan_dir, cam, 'panoptic', os.path.basename(data_path)[:-4] + '.png')
+                    pan_img = np.asarray(Image.open(pan_file))
+                    pan_label = img2pan(pan_img)
+
+                    box = boxes[0]
+                    corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
+                    min_x = np.min(corners[0, :])
+                    max_x = np.max(corners[0, :])
+                    min_y = np.min(corners[1, :])
+                    max_y = np.max(corners[1, :])
+                    box_2d = [min_x, min_y, max_x, max_y]
+                    tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins(pan_label,
+                                                                               name2label[self.cs_cat][2],
+                                                                               box_2d,
+                                                                               self.divisor)
+                    if self.debug:
+                        print(
+                            f'        tgt instance id: {tgt_ins_id}, '
+                            f'num of pixels: {tgt_ins_cnt}, '
+                            f'area ratio: {area_ratio}, '
+                            f'box_iou: {box_iou}')
+                    if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
+                        imgs.append(img)
+                        masks.append((pan_label == tgt_ins_id).astype(np.int32))
+                        rois.append(box_2d)
+                        camera_intrinsics.append(camera_intrinsic)
+                        camera_poses.append(cam_pose)
+                        valid_flags.append(1)
+
+                    if self.debug:
+                        camtoken = sample_record['data'][cam]
+                        fig, axes = plt.subplots(1, 2, figsize=(18, 9))
+                        axes[0].imshow(img)
+                        axes[0].set_title(self.nusc.get('sample_data', camtoken)['channel'])
+                        axes[0].axis('off')
+                        axes[0].set_aspect('equal')
+                        c = np.array(self.nusc.colormap[box.name]) / 255.0
+                        box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
+
+                        ins_vis = pan2ins_vis(pan_label, name2label[self.cs_cat][2], self.divisor)
+                        axes[1].imshow(ins_vis)
+                        axes[1].set_title('pred instance')
+                        axes[1].axis('off')
+                        axes[1].set_aspect('equal')
+                        # c = np.array(nusc.colormap[box.name]) / 255.0
+                        rect = patches.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
+                                                 linewidth=2, edgecolor='y', facecolor='none')
+                        axes[1].add_patch(rect)
+                        plt.show()
+
+                if len(imgs) == self.num_cams_per_sample:
+                    break
+
+        # fill the insufficient data slots
+        if 'LIDAR_TOP' not in sample_record['data'].keys() or len(imgs) < self.num_cams_per_sample:
+            for ii in range(len(imgs), self.num_cams_per_sample):
+                imgs.append(np.zeros((self.img_h, self.img_w, 3)))
+                masks.append(np.zeros((self.img_h, self.img_w, 3)))
+                rois.append(np.array([-1, -1, -1, -1]))
+                camera_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
+                camera_poses.append(np.zeros((3, 4)).astype(np.float32))
+                valid_flags.append(0)
+
+        return imgs, masks, rois, camera_intrinsics, camera_poses, valid_flags, instoken, anntoken
 
 
 if __name__ == '__main__':
-    tgt_category = 'vehicle.car'
-    cityscape_cat = 'car'
-    divisor = 1000
-    panoptic_folder = '/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred'
-    nusc = NuScenes(version='v1.0-mini', dataroot='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini', verbose=True)
-    nusc.list_scenes()
-    instance_all = nusc.instance
-    tgt_instance_list = []
-    # retrieve all the target instance
-    for instance in instance_all:
-        if nusc.get('category', instance['category_token'])['name'] == tgt_category:
-            tgt_instance_list.append(instance)
+    from torch.utils.data import DataLoader
 
-    # retrieve all the annotations for each instance
-    for instance in tgt_instance_list:
-        ann_tokens = nusc.field2token('sample_annotation', 'instance_token', instance['token'])
-        instoken=instance['token']
-        print(f'instance: {instoken}')
+    nusc_dataset = NuScenesData(
+        nusc_cat='vehicle.car',
+        cs_cat='car',
+        nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
+        nusc_pan_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
+        nvsc_version='v1.0-mini',
+        num_cams_per_sample=1,
+        divisor=1000,
+        box_iou_th=0.5,
+        mask_pixels=2500,
+        img_h=900,
+        img_w=1600,
+        debug=True)
+    dataloader = DataLoader(nusc_dataset, batch_size=1, num_workers=0, shuffle=True)
 
-        # For each annotation get all the sensors
-        for anntoken in ann_tokens:
-            print(f'    anntoken: {anntoken}')
-            sample_ann = nusc.get('sample_annotation', anntoken)
-            # nusc.render_annotation(anntoken)
-            # plt.show()
-            # plt.waitforbuttonpress(0)
+    # Analysis of valid portion of data
+    valid_ann_total = 0
+    valid_ins_dic = {}
+    for ii, d in enumerate(dataloader):
+        imgs, masks, rois, camera_intrinsics, camera_poses, valid_flags, instoken, anntoken = d
+        num_valid_cam = np.sum(valid_flags)
+        valid_ann_total += int(num_valid_cam > 0)
+        if instoken[0] not in valid_ins_dic.keys():
+            valid_ins_dic[instoken[0]] = 0
+        if num_valid_cam > 0:
+            valid_ins_dic[instoken[0]] = 1
+        print(f'Finish {ii} / {len(dataloader)}, valid samples: {num_valid_cam}')
+    print(f'Number of annotations having valid camera data support: {valid_ann_total} out of {len(dataloader)} annotations')
 
-            sample_record = nusc.get('sample', sample_ann['sample_token'])
-            assert 'LIDAR_TOP' in sample_record['data'].keys(), 'Error: No LIDAR_TOP in data, unable to render.'
+    valid_ins = [ins for ins in valid_ins_dic.keys() if valid_ins_dic[ins] == 1]
+    print(f'Number of instance with having valid camera data support: {len(valid_ins)} out of {len(valid_ins_dic.keys())} instances')
 
-            # Figure out which camera the object is fully visible in (this may return nothing).
-            boxes, cam = [], []
-            cams = [key for key in sample_record['data'].keys() if 'CAM' in key]
-            tgt_cams = []
-            for cam in cams:
-                data_path, boxes, camera_intrinsic = nusc.get_sample_data(sample_record['data'][cam],
-                                                                          box_vis_level=BoxVisibility.ALL,
-                                                                          selected_anntokens=[anntoken])
-                if len(boxes) > 0:
-                    assert len(boxes) > 0, 'Error: Could not find image where annotation is visible. ' \
-                                               'Try using e.g. BoxVisibility.ANY.'
-                    assert len(boxes) < 2, 'Error: Found multiple annotations. Something is wrong!'
+    # Another loop to check the optimizable portion include parked object with valid support from other timestamp
+    opt_ann_total = 0
+    for ii, anntoken in enumerate(nusc_dataset.anntokens):
+        sample_ann = nusc_dataset.nusc.get('sample_annotation', anntoken)
+        instoken = nusc_dataset.instokens[ii]
+        if valid_ins_dic[instoken] > 0:
+            for att_token in sample_ann['attribute_tokens']:
+                attribute = nusc_dataset.nusc.get('attribute', att_token)
+                if attribute['name'] == 'vehicle.parked' or attribute['name'] == 'vehicle.stopped':
+                    opt_ann_total += 1
+                    break
+    print(f'Number of optimizable annotations having indirect camera data support: {opt_ann_total} out of {len(dataloader)} annotations')
 
-                    fig, axes = plt.subplots(1, 2, figsize=(18, 9))
-                    tgt_cams.append(cam)
-                    camtoken = sample_record['data'][cam]
-
-                    # Plot CAMERA view.
-                    # data_path, boxes, camera_intrinsic = nusc.get_sample_data(camtoken, selected_anntokens=[anntoken])
-                    im = Image.open(data_path)
-                    axes[0].imshow(im)
-                    axes[0].set_title(nusc.get('sample_data', camtoken)['channel'])
-                    axes[0].axis('off')
-                    axes[0].set_aspect('equal')
-                    for box in boxes:
-                        c = np.array(nusc.colormap[box.name]) / 255.0
-                        box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
-
-                    # visualize pred instance mask
-                    pan_file = os.path.join(panoptic_folder, cam, 'panoptic', os.path.basename(data_path)[:-4]+'.png')
-                    pan_img = np.asarray(Image.open(pan_file))
-                    pan_label = img2pan(pan_img)
-                    ins_vis = pan2ins_vis(pan_label, name2label[cityscape_cat][2], divisor)
-
-                    axes[1].imshow(ins_vis)
-                    axes[1].set_title('pred instance')
-                    axes[1].axis('off')
-                    axes[1].set_aspect('equal')
-                    for box in boxes:
-                        c = np.array(nusc.colormap[box.name]) / 255.0
-                        corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
-                        min_x = np.min(corners[0, :])
-                        max_x = np.max(corners[0, :])
-                        min_y = np.min(corners[1, :])
-                        max_y = np.max(corners[1, :])
-                        rect = patches.Rectangle((min_x, min_y), max_x-min_x, max_y-min_y,
-                                                 linewidth=2, edgecolor='y', facecolor='none')
-                        axes[1].add_patch(rect)
-                        tgt_ins_id, tgt_ins_cnt = tgt_instance(pan_label, name2label[cityscape_cat][2],
-                                                               [min_x, min_y, max_x, max_y])
-                        if tgt_ins_id is not None:
-                            area_ratio = float(tgt_ins_cnt) / (max_x - min_x) / (max_y - min_y)
-                            print(f'        tgt instand id: {tgt_ins_id}, num of pixels: {tgt_ins_cnt}, area ratio: {area_ratio}')
-                        else:
-                            print(f'        no tgt instance found')
-
-                        # box.render(axes[1], view=camera_intrinsic, normalize=True, colors=(c, c, c))
-                    plt.show()  # Press Q to quite the figure
-                    # plt.waitforbuttonpress()
-                    # plt.close('all')
+    """
+        Observed invalid scenarios:
+            night (failure of instance prediction cross-domain)
+            truncation (currently not included)
+            general instance prediction failure
+            too far-away
+            too heavy occluded (some fully occluded case's annotation may come from the projection of another time's annotations for static object)
+    """
