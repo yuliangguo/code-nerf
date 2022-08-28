@@ -284,12 +284,10 @@ class NuScenesData:
             for cam in cams:
                 if self.debug:
                     print(f'     cam{cam}')
-                # TODO: should it consider BoxVisibility.ANY?
+                # TODO: consider BoxVisibility.ANY?
                 data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(sample_record['data'][cam],
                                                                                box_vis_level=BoxVisibility.ALL,
                                                                                selected_anntokens=[anntoken])
-                # TODO: compute the camera pose in object frame, make sure dataset and model definitions consistent
-                cam_pose = camera_intrinsic
                 if len(boxes) == 1:
                     # Plot CAMERA view.
                     img = Image.open(data_path)
@@ -300,7 +298,16 @@ class NuScenesData:
                     pan_img = np.asarray(Image.open(pan_file))
                     pan_label = img2pan(pan_img)
 
+                    # box here is in sensor coordinate system
                     box = boxes[0]
+                    # compute the camera pose in object frame, make sure dataset and model definitions consistent
+                    obj_center = box.center
+                    obj_orientation = box.orientation.rotation_matrix
+
+                    # TODO: verify it by the rendering
+                    cam_pose = np.concatenate([obj_orientation.transpose(),
+                                               np.matmul(obj_orientation, -np.expand_dims(obj_center, -1))], axis=1)
+                    # find the valid instance given 2d box projection
                     corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
                     min_x = np.min(corners[0, :])
                     max_x = np.max(corners[0, :])
@@ -359,7 +366,12 @@ class NuScenesData:
                 camera_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
-        return imgs, masks, rois, camera_intrinsics, camera_poses, valid_flags, instoken, anntoken
+        return torch.from_numpy(np.asarray(imgs)), \
+               torch.from_numpy(np.asarray(masks)), \
+               torch.from_numpy(np.asarray(rois)), \
+               torch.from_numpy(np.asarray(camera_intrinsics)), \
+               torch.from_numpy(np.asarray(camera_poses)), \
+               np.asarray(valid_flags), instoken, anntoken
 
 
 if __name__ == '__main__':
@@ -377,7 +389,7 @@ if __name__ == '__main__':
         mask_pixels=2500,
         img_h=900,
         img_w=1600,
-        debug=True)
+        debug=False)
     dataloader = DataLoader(nusc_dataset, batch_size=1, num_workers=0, shuffle=True)
 
     # Analysis of valid portion of data
@@ -385,7 +397,7 @@ if __name__ == '__main__':
     valid_ins_dic = {}
     for ii, d in enumerate(dataloader):
         imgs, masks, rois, camera_intrinsics, camera_poses, valid_flags, instoken, anntoken = d
-        num_valid_cam = np.sum(valid_flags)
+        num_valid_cam = np.sum(valid_flags.numpy())
         valid_ann_total += int(num_valid_cam > 0)
         if instoken[0] not in valid_ins_dic.keys():
             valid_ins_dic[instoken[0]] = 0
