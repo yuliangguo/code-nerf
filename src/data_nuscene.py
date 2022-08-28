@@ -304,9 +304,11 @@ class NuScenesData:
                     obj_center = box.center
                     obj_orientation = box.orientation.rotation_matrix
 
-                    # TODO: verify it by the rendering
-                    cam_pose = np.concatenate([obj_orientation.transpose(),
-                                               np.matmul(obj_orientation, -np.expand_dims(obj_center, -1))], axis=1)
+                    # Compute camera pose in object frame = c2o transformation matrix
+                    # Recall that object pose in camera frame = o2c transformation matrix
+                    R_c2o = obj_orientation.transpose()
+                    t_c2o = - R_c2o @ np.expand_dims(obj_center, -1)
+                    cam_pose = np.concatenate([R_c2o, t_c2o], axis=1)
                     # find the valid instance given 2d box projection
                     corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
                     min_x = np.min(corners[0, :])
