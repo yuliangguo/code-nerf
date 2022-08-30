@@ -377,6 +377,7 @@ class NuScenesData:
 
 
 if __name__ == '__main__':
+    # TODO: check if instance mask can be found from nuimages
     from torch.utils.data import DataLoader
 
     nusc_dataset = NuScenesData(
