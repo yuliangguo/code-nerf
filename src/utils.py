@@ -20,7 +20,32 @@ def get_rays(H, W, focal, c2w):
     return rays_o, viewdirs
 
 
-def sample_from_rays(ro, vd, near, far, N_samples, z_fixed = False):
+def get_rays2(K, c2w, roi):
+    """
+    K: intrinsic matrix
+    c2w: camera pose in object (world) coordinate frame
+    roi: [min_x, min_y, max_x, max_y]
+
+    ATTENTION: the number of output rays depends on roi inputs
+    TODO: computed near and far?
+    """
+    dx = K[0, 2]
+    dy = K[1, 2]
+    fx = K[0, 0]
+    fy = K[1, 1]
+    i, j = torch.meshgrid(torch.linspace(roi[0], roi[2]-1, roi[2]-roi[0]),
+                          torch.linspace(roi[1], roi[3]-1, roi[3]-roi[1]))
+    i = i.t()
+    j = j.t()
+    dirs = torch.stack([(i - dx) / fx, -(j - dy) / fy, -torch.ones_like(i)], -1)
+    rays_d = torch.sum(dirs[..., np.newaxis, :].type_as(c2w) * c2w[..., :3, :3], -1)
+    viewdirs = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)
+    rays_o = c2w[..., :3, -1].expand(rays_d.shape)
+    rays_o, viewdirs = rays_o.reshape(-1, 3), viewdirs.reshape(-1, 3)
+    return rays_o, viewdirs
+
+
+def sample_from_rays(ro, vd, near, far, N_samples, z_fixed=False):
     # Given ray centre (camera location), we sample z_vals
     # TODO: this type of sampling might be limited to the camera view facing the object center.
     #  The samples from rays away from the image center can be very sparse

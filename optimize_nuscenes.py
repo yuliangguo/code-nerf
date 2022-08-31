@@ -34,7 +34,8 @@ if __name__ == '__main__':
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", default=50)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
-    arg_parser.add_argument("--batchsize", dest="batchsize", type=int, default=2048)
+    arg_parser.add_argument("--batchsize", dest="batchsize", type=int, default=1800)
+    arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
 
     args = arg_parser.parse_args()
     model_dir = args.model_dir
@@ -58,7 +59,7 @@ if __name__ == '__main__':
         img_h=900,
         img_w=1600,
         debug=False)
-    dataloader = DataLoader(nusc_dataset, batch_size=1, num_workers=0, shuffle=True)
 
-    optimizer = OptimizerNuScenes(model_dir, gpu, nusc_dataset, args.jsonfile, batchsize, num_opts, args.num_cams_per_sample)
+    optimizer = OptimizerNuScenes(model_dir, gpu, nusc_dataset, args.jsonfile, batchsize, num_opts,
+                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=False)
     optimizer.optimize_objs(lr, lr_half_interval, save_img)
