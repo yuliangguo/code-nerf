@@ -369,7 +369,7 @@ class NuScenesData:
                 valid_flags.append(0)
 
         return torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.), \
-               torch.from_numpy(np.asarray(masks)), \
+               torch.from_numpy(np.asarray(masks).astype(np.float32)), \
                torch.from_numpy(np.asarray(rois).astype(np.int32)), \
                torch.from_numpy(np.asarray(camera_intrinsics).astype(np.float32)), \
                torch.from_numpy(np.asarray(camera_poses).astype(np.float32)), \

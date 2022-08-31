@@ -29,7 +29,6 @@ def get_rays_nuscenes(K, c2w, roi):
     ATTENTION:
     the number of output rays depends on roi inputs
     nuscenes uses a different camera coordinate frame compared to shapenet srn
-    TODO: computed near and far?
     """
     dx = K[0, 2]
     dy = K[1, 2]

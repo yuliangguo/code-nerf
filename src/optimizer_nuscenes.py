@@ -63,8 +63,8 @@ class OptimizerNuScenes:
                 self.optimized_ann_flag[anntoken] = 0
         for ii, instoken in enumerate(self.nusc_dataset.instokens):
             if instoken not in self.optimized_shapecodes.keys():
-                self.optimized_shapecodes[instoken] = self.mean_shape.clone().detach()
-                self.optimized_texturecodes[instoken] = self.mean_texture.clone().detach()
+                self.optimized_shapecodes[instoken] = self.mean_shape.detach().clone()
+                self.optimized_texturecodes[instoken] = self.mean_texture.detach().clone()
                 self.optimized_ins_flag[instoken] = 0
 
     def optimize_objs(self, lr=1e-2, lr_half_interval=50, save_img=True):
@@ -84,16 +84,11 @@ class OptimizerNuScenes:
                 continue
 
             instoken, anntoken = instoken[0], anntoken[0]
-            # H, W = imgs.shape[-3], imgs.shape[-2]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-            # obj_sz = np.linalg.norm(obj_sz).astype(np.float32)
-            # near = np.min(obj_sz)/3
-            # far = np.linalg.norm(obj_sz).astype(np.float32)/2
+
 
             self.nopts, self.lr_half_interval = 0, lr_half_interval
-            # shapecode = self.mean_shape.to(self.device).clone().detach().requires_grad_()
-            # texturecode = self.mean_texture.to(self.device).clone().detach().requires_grad_()
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
             texturecode = self.optimized_texturecodes[instoken].to(self.device).detach().requires_grad_()
 
@@ -103,9 +98,10 @@ class OptimizerNuScenes:
                 self.opts.zero_grad()
                 t1 = time.time()
                 gt_imgs = []
+                gt_masks = []
                 loss_per_img = []
                 for num, cam_id in enumerate(cam_ids):
-                    tgt_img, tgt_pose, roi, K = tgt_imgs[num].reshape(-1,3), tgt_poses[num], rois[num], camera_intrinsics[num]
+                    tgt_img, tgt_pose, mask, roi, K = tgt_imgs[num], tgt_poses[num], masks[num], rois[num], camera_intrinsics[num]
 
                     # near and far sample range need to be adaptively calculated
                     near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
@@ -118,26 +114,35 @@ class OptimizerNuScenes:
                     random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                     rays_o = rays_o[random_ray_ids]
                     viewdir = viewdir[random_ray_ids]
-                    tgt_img = tgt_img[random_ray_ids]
+                    # The random selection should be within the roi pixels
+                    tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 3)
+                    mask = mask[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 1)
+                    tgt_img = tgt_img[random_ray_ids].to(self.device)
+                    mask = mask[random_ray_ids].to(self.device)
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
                     # TODO: how the object space is normalized and transferred shape net
                     xyz /= obj_diag
                     xyz = xyz[:, :, [1, 0, 2]]
+                    viewdir = viewdir[:, :, [1, 0, 2]]
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
                                               shapecode, texturecode)
                     rgb_rays, depth_rays = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                    loss_l2 = torch.mean((rgb_rays - tgt_img.type_as(rgb_rays)) ** 2)
+                    # TODO: use mask in loss. Add occupancy loss?
+                    # loss_l2 = torch.mean((rgb_rays - tgt_img.type_as(rgb_rays)) ** 2)
+                    loss_l2 = torch.sum((rgb_rays - tgt_img) ** 2 * mask) / (torch.sum(mask)+1e-9)
+
                     reg_loss = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    # TODO: add occupancy loss based on mask
                     loss = loss_l2 + loss_reg
                     loss.backward()
                     loss_per_img.append(loss_l2.item())
+                    # TODO: this way might not satisfy the save_image when roi regions are different
                     gt_imgs.append(tgt_imgs[num, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
+                    gt_masks.append(masks[num, roi[1]:roi[3], roi[0]:roi[2]])
 
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * num_obj,
@@ -161,6 +166,7 @@ class OptimizerNuScenes:
                             # TODO: how the object space is normalized and transferred shape net
                             xyz /= obj_diag
                             xyz = xyz[:, :, [1, 0, 2]]
+                            viewdir = viewdir[:, :, [1, 0, 2]]
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -172,7 +178,7 @@ class OptimizerNuScenes:
                                 generated_img.append(rgb_rays)
                             # generated_imgs.append(torch.cat(generated_img).reshape(H, W, 3))
                             generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
-                    self.save_img(generated_imgs, gt_imgs, anntoken, self.nopts)
+                    self.save_img(generated_imgs, gt_imgs, gt_masks, anntoken, self.nopts)
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
@@ -398,16 +404,17 @@ class OptimizerNuScenes:
         torch.save(saved_dict, os.path.join(self.save_dir, 'codes+poses.pth'))
         print('We finished the optimization of ' + str(num_obj))
 
-    def save_img(self, generated_imgs, gt_imgs, obj_id, instance_num, opt=True):
+    def save_img(self, generated_imgs, gt_imgs, masks, obj_id, instance_num, opt=True):
         H, W = gt_imgs[0].shape[:2]
         nviews = int(self.nviews)
         if not opt:
             nviews = 1
         generated_imgs = torch.cat(generated_imgs).reshape(nviews, H, W, 3)
+        masks = torch.cat(masks).reshape(nviews, H, W, 1)
         gt_imgs = torch.cat(gt_imgs).reshape(nviews, H, W, 3)
         ret = torch.zeros(nviews *H, 2 * W, 3)
         ret[:,:W,:] = generated_imgs.reshape(-1, W, 3)
-        ret[:,W:,:] = gt_imgs.reshape(-1, W, 3)
+        ret[:,W:,:] = gt_imgs.reshape(-1, W, 3) * 0.5 + masks.reshape(-1, W, 1) * 0.5
         ret = image_float_to_uint8(ret.detach().cpu().numpy())
         save_img_dir = os.path.join(self.save_dir, obj_id)
         if not os.path.isdir(save_img_dir):
