@@ -20,13 +20,15 @@ def get_rays(H, W, focal, c2w):
     return rays_o, viewdirs
 
 
-def get_rays2(K, c2w, roi):
+def get_rays_nuscenes(K, c2w, roi):
     """
     K: intrinsic matrix
     c2w: camera pose in object (world) coordinate frame
     roi: [min_x, min_y, max_x, max_y]
 
-    ATTENTION: the number of output rays depends on roi inputs
+    ATTENTION:
+    the number of output rays depends on roi inputs
+    nuscenes uses a different camera coordinate frame compared to shapenet srn
     TODO: computed near and far?
     """
     dx = K[0, 2]
@@ -37,7 +39,8 @@ def get_rays2(K, c2w, roi):
                           torch.linspace(roi[1], roi[3]-1, roi[3]-roi[1]))
     i = i.t()
     j = j.t()
-    dirs = torch.stack([(i - dx) / fx, -(j - dy) / fy, -torch.ones_like(i)], -1)
+    # some signs are opposite to get_rays for shapenet srn dataset
+    dirs = torch.stack([(i - dx) / fx, (j - dy) / fy, torch.ones_like(i)], -1)
     rays_d = torch.sum(dirs[..., np.newaxis, :].type_as(c2w) * c2w[..., :3, :3], -1)
     viewdirs = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)
     rays_o = c2w[..., :3, -1].expand(rays_d.shape)
@@ -61,7 +64,7 @@ def sample_from_rays(ro, vd, near, far, N_samples, z_fixed=False):
     return xyz, vd, z_vals
 
 
-def volume_rendering(sigmas, rgbs, z_vals, white_bg = True):
+def volume_rendering(sigmas, rgbs, z_vals, white_bg=True):
     deltas = z_vals[1:] - z_vals[:-1]
     deltas = torch.cat([deltas, torch.ones_like(deltas[:1]) * 1e10])
     alphas = 1 - torch.exp(-sigmas.squeeze(-1) * deltas)

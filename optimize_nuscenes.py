@@ -61,5 +61,5 @@ if __name__ == '__main__':
         debug=False)
 
     optimizer = OptimizerNuScenes(model_dir, gpu, nusc_dataset, args.jsonfile, batchsize, num_opts,
-                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=False)
+                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=True)
     optimizer.optimize_objs(lr, lr_half_interval, save_img)
