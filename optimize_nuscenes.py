@@ -55,11 +55,11 @@ if __name__ == '__main__':
         num_cams_per_sample=args.num_cams_per_sample,
         divisor=1000,
         box_iou_th=0.5,
-        mask_pixels=2500,
+        mask_pixels=10000,
         img_h=900,
         img_w=1600,
         debug=False)
 
     optimizer = OptimizerNuScenes(model_dir, gpu, nusc_dataset, args.jsonfile, batchsize, num_opts,
-                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=True)
+                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=False)
     optimizer.optimize_objs(lr, lr_half_interval, save_img)

@@ -79,6 +79,22 @@ def volume_rendering(sigmas, rgbs, z_vals, white_bg=True):
     return rgb_final, depth_final
 
 
+def volume_rendering2(sigmas, rgbs, z_vals, white_bg=False):
+    deltas = z_vals[1:] - z_vals[:-1]
+    deltas = torch.cat([deltas, torch.ones_like(deltas[:1]) * 1e10])
+    alphas = 1 - torch.exp(-sigmas.squeeze(-1) * deltas)
+    trans = 1 - alphas + 1e-10
+    transmittance = torch.cat([torch.ones_like(trans[..., :1]), trans], -1)
+    accum_trans = torch.cumprod(transmittance, -1)[..., :-1]
+    weights = alphas * accum_trans
+    rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)
+    depth_final = torch.sum(weights * z_vals, -1)
+    if white_bg:
+        weights_sum = weights.sum(1)
+        rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
+    return rgb_final, depth_final, accum_trans[:, -1]
+
+
 def image_float_to_uint8(img):
     """
     Convert a float image (0.0-1.0) to uint8 (0-255)

@@ -10,7 +10,7 @@ import matplotlib.patches as patches
 from PIL import Image
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.geometry_utils import BoxVisibility, view_points
-from cityscapesscripts.helpers.labels import labels, name2label
+from cityscapesscripts.helpers.labels import labels, name2label, trainId2label
 
 
 # Reference: https://github.com/facebookresearch/detectron2/blob/master/detectron2/utils/colormap.py#L14
@@ -123,6 +123,26 @@ def pan2ins_vis(pan, cat_id, divisor):
     return img
 
 
+def get_mask_occ_cityscape(pan, tgt_pan_id, divisor):
+    """
+        Prepare occupancy mask:
+            target object: 1
+            background: -1 (not likely to occlude the object)
+            occluded the instance: 0 (seems only able to reason the occlusion by foreground)
+    """
+    mask_occ = np.zeros_like(pan).astype(np.int32)
+    pan_ids = np.unique(pan)
+
+    # assign background
+    for pan_id in pan_ids:
+        cat_id = pan_id // divisor
+        if trainId2label[cat_id].category in ['sky', 'nature', 'construction', 'flat', 'void']:
+            mask_occ[pan == pan_id] = -1
+        elif pan_id == tgt_pan_id:
+            mask_occ[pan == pan_id] = 1
+    return mask_occ
+
+
 def get_tgt_ins(pan, cat_id, box, divisor=1000):
     # return the instance label and pixel counts in the box
     min_x, min_y, max_x, max_y = box
@@ -217,7 +237,7 @@ class NuScenesData:
                  num_cams_per_sample=1,
                  divisor=1000,
                  box_iou_th=0.5,
-                 mask_pixels=2500,
+                 mask_pixels=10000,
                  img_h=900,
                  img_w=1600,
                  debug=False):
@@ -268,7 +288,7 @@ class NuScenesData:
 
         # extract fixed number of qualified samples per instance
         imgs = []
-        masks = []
+        masks_occ = []
         camera_poses = []
         camera_intrinsics = []
         rois = []  # used to sample rays
@@ -328,32 +348,34 @@ class NuScenesData:
                             f'box_iou: {box_iou}')
                     if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
                         imgs.append(img)
-                        masks.append((pan_label == tgt_ins_id).astype(np.int32))
+                        mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
+                        masks_occ.append(mask_occ.astype(np.int32))
+                        # masks.append((pan_label == tgt_ins_id).astype(np.int32))
                         rois.append(box_2d)
                         camera_intrinsics.append(camera_intrinsic)
                         camera_poses.append(cam_pose)
                         valid_flags.append(1)
 
-                    if self.debug:
-                        camtoken = sample_record['data'][cam]
-                        fig, axes = plt.subplots(1, 2, figsize=(18, 9))
-                        axes[0].imshow(img)
-                        axes[0].set_title(self.nusc.get('sample_data', camtoken)['channel'])
-                        axes[0].axis('off')
-                        axes[0].set_aspect('equal')
-                        c = np.array(self.nusc.colormap[box.name]) / 255.0
-                        box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
+                        if self.debug:
+                            camtoken = sample_record['data'][cam]
+                            fig, axes = plt.subplots(1, 2, figsize=(18, 9))
+                            axes[0].imshow(img)
+                            axes[0].set_title(self.nusc.get('sample_data', camtoken)['channel'])
+                            axes[0].axis('off')
+                            axes[0].set_aspect('equal')
+                            c = np.array(self.nusc.colormap[box.name]) / 255.0
+                            box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
 
-                        ins_vis = pan2ins_vis(pan_label, name2label[self.cs_cat][2], self.divisor)
-                        axes[1].imshow(ins_vis)
-                        axes[1].set_title('pred instance')
-                        axes[1].axis('off')
-                        axes[1].set_aspect('equal')
-                        # c = np.array(nusc.colormap[box.name]) / 255.0
-                        rect = patches.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
-                                                 linewidth=2, edgecolor='y', facecolor='none')
-                        axes[1].add_patch(rect)
-                        plt.show()
+                            ins_vis = pan2ins_vis(pan_label, name2label[self.cs_cat][2], self.divisor)
+                            axes[1].imshow(ins_vis)
+                            axes[1].set_title('pred instance')
+                            axes[1].axis('off')
+                            axes[1].set_aspect('equal')
+                            # c = np.array(nusc.colormap[box.name]) / 255.0
+                            rect = patches.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
+                                                     linewidth=2, edgecolor='y', facecolor='none')
+                            axes[1].add_patch(rect)
+                            plt.show()
 
                 if len(imgs) == self.num_cams_per_sample:
                     break
@@ -362,14 +384,14 @@ class NuScenesData:
         if 'LIDAR_TOP' not in sample_record['data'].keys() or len(imgs) < self.num_cams_per_sample:
             for ii in range(len(imgs), self.num_cams_per_sample):
                 imgs.append(np.zeros((self.img_h, self.img_w, 3)))
-                masks.append(np.zeros((self.img_h, self.img_w, 3)))
+                masks_occ.append(np.zeros((self.img_h, self.img_w, 3)))
                 rois.append(np.array([-1, -1, -1, -1]))
                 camera_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
                 camera_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
         return torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.), \
-               torch.from_numpy(np.asarray(masks).astype(np.float32)), \
+               torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
                torch.from_numpy(np.asarray(rois).astype(np.int32)), \
                torch.from_numpy(np.asarray(camera_intrinsics).astype(np.float32)), \
                torch.from_numpy(np.asarray(camera_poses).astype(np.float32)), \
@@ -377,8 +399,10 @@ class NuScenesData:
 
 
 if __name__ == '__main__':
-    # TODO: check if instance mask can be found from nuimages
     from torch.utils.data import DataLoader
+    from nuimages import NuImages
+
+    nuim = NuImages(dataroot='/mnt/LinuxDataFast/Datasets/nuimages', version='v1.0-train', verbose=True, lazy=True)
 
     nusc_dataset = NuScenesData(
         nusc_cat='vehicle.car',
@@ -389,17 +413,27 @@ if __name__ == '__main__':
         num_cams_per_sample=1,
         divisor=1000,
         box_iou_th=0.5,
-        mask_pixels=2500,
+        mask_pixels=10000,
         img_h=900,
         img_w=1600,
-        debug=False)
+        debug=True)
     dataloader = DataLoader(nusc_dataset, batch_size=1, num_workers=0, shuffle=True)
+
+    # Check the overlap of nuscenes and nuimages
+    for ii, anntoken in enumerate(nusc_dataset.anntokens):
+        sample_ann = nusc_dataset.nusc.get('sample_annotation', anntoken)
+        try:
+            sample_idx_check = nuim.getind('sample', sample_ann['sample_token'])
+            print('find an existence in nuimages')
+        except:
+            print('no match in nuimages')
 
     # Analysis of valid portion of data
     valid_ann_total = 0
     valid_ins_dic = {}
     for ii, d in enumerate(dataloader):
         imgs, masks, rois, camera_intrinsics, camera_poses, valid_flags, instoken, anntoken = d
+
         num_valid_cam = np.sum(valid_flags.numpy())
         valid_ann_total += int(num_valid_cam > 0)
         if instoken[0] not in valid_ins_dic.keys():
