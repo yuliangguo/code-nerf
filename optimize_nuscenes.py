@@ -14,7 +14,7 @@ from src.data_nuscene import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--model_dir", dest="model_dir", default='srncar',
+    arg_parser.add_argument("--model_dir", dest="model_dir", default='srncar_08182022',
                             help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nvsc_version", dest="nvsc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", default=200)
+    arg_parser.add_argument("--num_opts", dest="num_opts", default=20)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", default=50)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
@@ -61,5 +61,5 @@ if __name__ == '__main__':
         debug=False)
 
     optimizer = OptimizerNuScenes(model_dir, gpu, nusc_dataset, args.jsonfile, batchsize, num_opts,
-                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=False)
+                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=True)
     optimizer.optimize_objs(lr, lr_half_interval, save_img)

@@ -20,5 +20,5 @@
     {"type":  "step", "lr":  1e-4, "interval":  250000},
     {"type":  "step", "lr":  1e-3, "interval":  250000}
   ],
-  "check_points": 100000
+  "check_points": 1100000
 }

@@ -416,7 +416,7 @@ class OptimizerNuScenes:
         gt_imgs = torch.cat(gt_imgs).reshape(nviews, H, W, 3)
         ret = torch.zeros(nviews *H, 2 * W, 3)
         ret[:,:W,:] = generated_imgs.reshape(-1, W, 3)
-        ret[:,W:,:] = gt_imgs.reshape(-1, W, 3) * 0.5 + masks_occ.reshape(-1, W, 1) * 0.5
+        ret[:,W:,:] = gt_imgs.reshape(-1, W, 3) * 0.75 + masks_occ.reshape(-1, W, 1) * 0.25
         ret = image_float_to_uint8(ret.detach().cpu().numpy())
         save_img_dir = os.path.join(self.save_dir, obj_id)
         if not os.path.isdir(save_img_dir):
