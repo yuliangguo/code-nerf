@@ -265,14 +265,18 @@ class NuScenesData:
         # self.tgt_instance_list = []
         self.instokens = []
         self.anntokens = []  # multiple anntokens can have the same instoken
+        self.ins_ann_tokens = {}
         # retrieve all the target instance
         for instance in instance_all:
             if self.nusc.get('category', instance['category_token'])['name'] == nusc_cat:
+                instoken = instance['token']
                 # self.tgt_instance_list.append(instance)
-                anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instance['token'])
+                anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
                 for anntoken in anntokens:
-                    self.instokens.append(instance['token'])
+                    self.instokens.append(instoken)
                     self.anntokens.append(anntoken)
+                self.ins_ann_tokens[instoken] = anntokens
+
         self.lenids = len(self.anntokens)
         print(f'{self.lenids} annotations in {self.nusc_cat} category are included in dataloader.')
         self.num_cams_per_sample = num_cams_per_sample
@@ -396,6 +400,127 @@ class NuScenesData:
                torch.from_numpy(np.asarray(camera_intrinsics).astype(np.float32)), \
                torch.from_numpy(np.asarray(camera_poses).astype(np.float32)), \
                np.asarray(valid_flags), instoken, anntoken
+
+    def get_ins_samples(self, instoken):
+        # anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
+        anntokens = self.ins_ann_tokens[instoken]
+
+        # extract fixed number of qualified samples per instance
+        imgs = []
+        masks_occ = []
+        camera_poses = []
+        camera_intrinsics = []
+        rois = []  # used to sample rays
+        out_anntokens = []
+
+        for anntoken in anntokens:
+            if self.debug:
+                print(f'instance: {instoken}, anntoken: {anntoken}')
+
+            # For each annotation (one annotation per timestamp) get all the sensors
+            sample_ann = self.nusc.get('sample_annotation', anntoken)
+            sample_record = self.nusc.get('sample', sample_ann['sample_token'])
+            if 'LIDAR_TOP' in sample_record['data'].keys():
+                # Figure out which camera the object is fully visible in (this may return nothing).
+                cams = [key for key in sample_record['data'].keys() if 'CAM' in key]
+                cams = np.random.permutation(cams)
+                for cam in cams:
+                    if self.debug:
+                        print(f'     cam{cam}')
+                    # TODO: consider BoxVisibility.ANY?
+                    data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(sample_record['data'][cam],
+                                                                                   box_vis_level=BoxVisibility.ALL,
+                                                                                   selected_anntokens=[anntoken])
+                    if len(boxes) == 1:
+                        # Plot CAMERA view.
+                        img = Image.open(data_path)
+                        img = np.asarray(img)
+
+                        # visualize pred instance mask
+                        pan_file = os.path.join(self.nusc_pan_dir, cam, 'panoptic',
+                                                os.path.basename(data_path)[:-4] + '.png')
+                        pan_img = np.asarray(Image.open(pan_file))
+                        pan_label = img2pan(pan_img)
+
+                        # box here is in sensor coordinate system
+                        box = boxes[0]
+                        # compute the camera pose in object frame, make sure dataset and model definitions consistent
+                        obj_center = box.center
+                        obj_orientation = box.orientation.rotation_matrix
+
+                        # Compute camera pose in object frame = c2o transformation matrix
+                        # Recall that object pose in camera frame = o2c transformation matrix
+                        R_c2o = obj_orientation.transpose()
+                        t_c2o = - R_c2o @ np.expand_dims(obj_center, -1)
+                        cam_pose = np.concatenate([R_c2o, t_c2o], axis=1)
+                        # find the valid instance given 2d box projection
+                        corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
+                        min_x = np.min(corners[0, :])
+                        max_x = np.max(corners[0, :])
+                        min_y = np.min(corners[1, :])
+                        max_y = np.max(corners[1, :])
+                        box_2d = [min_x, min_y, max_x, max_y]
+                        tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins(pan_label,
+                                                                                   name2label[self.cs_cat][2],
+                                                                                   box_2d,
+                                                                                   self.divisor)
+                        if self.debug:
+                            print(
+                                f'        tgt instance id: {tgt_ins_id}, '
+                                f'num of pixels: {tgt_ins_cnt}, '
+                                f'area ratio: {area_ratio}, '
+                                f'box_iou: {box_iou}')
+                        if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
+                            imgs.append(img)
+                            mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
+                            masks_occ.append(mask_occ.astype(np.int32))
+                            # masks.append((pan_label == tgt_ins_id).astype(np.int32))
+                            rois.append(box_2d)
+                            camera_intrinsics.append(camera_intrinsic)
+                            camera_poses.append(cam_pose)
+                            out_anntokens.append(anntoken)
+
+                            if self.debug:
+                                camtoken = sample_record['data'][cam]
+                                fig, axes = plt.subplots(1, 2, figsize=(18, 9))
+                                axes[0].imshow(img)
+                                axes[0].set_title(self.nusc.get('sample_data', camtoken)['channel'])
+                                axes[0].axis('off')
+                                axes[0].set_aspect('equal')
+                                c = np.array(self.nusc.colormap[box.name]) / 255.0
+                                box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
+
+                                ins_vis = pan2ins_vis(pan_label, name2label[self.cs_cat][2], self.divisor)
+                                axes[1].imshow(ins_vis)
+                                axes[1].set_title('pred instance')
+                                axes[1].axis('off')
+                                axes[1].set_aspect('equal')
+                                # c = np.array(nusc.colormap[box.name]) / 255.0
+                                rect = patches.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
+                                                         linewidth=2, edgecolor='y', facecolor='none')
+                                axes[1].add_patch(rect)
+                                plt.show()
+
+                    if len(imgs) == 1:
+                        break
+
+            # # fill the insufficient data slots
+            # if 'LIDAR_TOP' not in sample_record['data'].keys() or len(imgs) < 1:
+            #     imgs.append(np.zeros((self.img_h, self.img_w, 3)))
+            #     masks_occ.append(np.zeros((self.img_h, self.img_w, 3)))
+            #     rois.append(np.array([-1, -1, -1, -1]))
+            #     camera_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
+            #     camera_poses.append(np.zeros((3, 4)).astype(np.float32))
+
+        if len(imgs) == 0:
+            return None, None, None, None, None, None
+
+        return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
+               torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
+               torch.from_numpy(np.asarray(rois).astype(np.int32)), \
+               torch.from_numpy(np.asarray(camera_intrinsics).astype(np.float32)), \
+               torch.from_numpy(np.asarray(camera_poses).astype(np.float32)), \
+               np.asarray(out_anntokens)
 
 
 if __name__ == '__main__':
