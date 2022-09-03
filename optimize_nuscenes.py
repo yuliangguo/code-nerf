@@ -59,7 +59,8 @@ if __name__ == '__main__':
         img_w=1600,
         debug=False)
 
+    save_postfix = '_nuscenes_multi'
     optimizer = OptimizerNuScenes(model_dir, gpu, nusc_dataset, args.jsonfile, batchsize, num_opts,
-                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=False)
+                                  args.num_cams_per_sample, num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
     # optimizer.optimize_objs(lr, lr_half_interval, save_img)
     optimizer.optimize_objs_multi_anns(lr, lr_half_interval, save_img)

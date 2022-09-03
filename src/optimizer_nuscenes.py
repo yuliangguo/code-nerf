@@ -72,6 +72,7 @@ class OptimizerNuScenes:
         """
             Optimize on each annotation frame independently
         """
+
         self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
         # cam_ids = torch.tensor(cam_ids)
         cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
@@ -200,6 +201,7 @@ class OptimizerNuScenes:
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
+
         self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
         instokens = self.nusc_dataset.ins_ann_tokens.keys()
 
