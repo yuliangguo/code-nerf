@@ -15,8 +15,8 @@ import time
 
 
 class Trainer():
-    def __init__(self, save_dir, gpu, jsonfile = 'srncar.json', batch_size=2048,
-                 check_iter = 10000):
+    def __init__(self, save_dir, gpu, jsonfile='srncar.json', batch_size=2048,
+                 check_iter=10000):
         super().__init__()
         # Read Hyperparameters
         hpampath = os.path.join('jsonfiles', jsonfile)
@@ -46,7 +46,6 @@ class Trainer():
             self.nepoch += 1
 
     def training_single_epoch(self, num_instances_per_obj, num_iters, crop_img = True):
-        # TODO: change num_iters
         # single epoch here means that it iterates over whole objects
         # only 1 or a few images are chosen for each epoch
         self.make_dataloader(num_instances_per_obj, crop_img = crop_img)

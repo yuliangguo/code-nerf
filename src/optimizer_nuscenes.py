@@ -77,8 +77,8 @@ class OptimizerNuScenes:
         # cam_ids = torch.tensor(cam_ids)
         cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
         # Per object
-        for num_obj, d in enumerate(self.dataloader):
-            print(f'num obj: {num_obj}/{len(self.dataloader)}')
+        for obj_dix, d in enumerate(self.dataloader):
+            print(f'num obj: {obj_dix}/{len(self.dataloader)}')
             # focal, H, W, imgs, poses, obj_idx = d
             imgs, masks_occ, rois, camera_intrinsics, poses, valid_flags, instoken, anntoken = d
             tgt_imgs, tgt_poses, masks_occ, rois, camera_intrinsics, valid_flags = \
@@ -151,9 +151,9 @@ class OptimizerNuScenes:
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * num_obj,
-                                       num_obj)
-                self.log_regloss(reg_loss.item(), self.nopts, num_obj)
+                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_dix,
+                                       obj_dix)
+                self.log_regloss(reg_loss.item(), self.nopts, obj_dix)
 
                 # Just use the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -195,7 +195,7 @@ class OptimizerNuScenes:
             self.optimized_texturecodes[instoken] = texturecode.detach().cpu()
             self.optimized_ins_flag[instoken] = 1
             self.optimized_ann_flag[anntoken] = 1
-            self.save_opts(num_obj)
+            self.save_opts(obj_dix)
 
     def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=50, save_img=True, roi_margin=5):
         """
@@ -206,8 +206,8 @@ class OptimizerNuScenes:
         instokens = self.nusc_dataset.ins_ann_tokens.keys()
 
         # Per object
-        for num_obj, instoken in enumerate(instokens):
-            print(f'num obj: {num_obj}/{len(instokens)}, instoken: {instoken}')
+        for obj_idx, instoken in enumerate(instokens):
+            print(f'num obj: {obj_idx}/{len(instokens)}, instoken: {instoken}')
 
             tgt_imgs, masks_occ, rois, camera_intrinsics, tgt_poses, anntokens = self.nusc_dataset.get_ins_samples(instoken)
 
@@ -285,9 +285,9 @@ class OptimizerNuScenes:
                     self.optimized_ann_flag[anntokens[num]] = 1
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * num_obj,
-                                       num_obj)
-                self.log_regloss(reg_loss.item(), self.nopts, num_obj)
+                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
+                                       obj_idx)
+                self.log_regloss(reg_loss.item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -331,7 +331,7 @@ class OptimizerNuScenes:
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
             self.optimized_texturecodes[instoken] = texturecode.detach().cpu()
             self.optimized_ins_flag[instoken] = 1
-            self.save_opts(num_obj)
+            self.save_opts(obj_idx)
 
     def save_opts(self, num_obj):
         saved_dict = {
