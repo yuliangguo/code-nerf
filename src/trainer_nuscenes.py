@@ -185,7 +185,7 @@ class TrainerNuScenes:
                 # TODO: modify the log img including occ mask
                 gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                 gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
-                self.log_img(generated_img, gt_img, obj_idx)
+                self.log_img(generated_img, gt_img, gt_mask_occ, obj_idx)
                 print(-10*np.log(np.mean(loss_per_img))/np.log(10), self.niter)
 
             # if self.niter % self.hpams['check_points'] == 0:
@@ -203,11 +203,11 @@ class TrainerNuScenes:
     def log_regloss(self, loss_reg, obj_idx):
         self.writer.add_scalar('reg/train', loss_reg, self.niter, obj_idx)
 
-    def log_img(self, generated_img, gtimg, obj_idx):
+    def log_img(self, generated_img, gtimg, mask_occ, obj_idx):
         H, W = generated_img.shape[:-1]
         ret = torch.zeros(H, 2 * W, 3)
         ret[:, :W, :] = generated_img
-        ret[:, W:, :] = gtimg
+        ret[:, W:, :] = gtimg * 0.7 + mask_occ.unsqueeze(-1) * 0.3
         ret = image_float_to_uint8(ret.detach().cpu().numpy())
         self.writer.add_image('train_' + str(self.niter) + '_' + str(obj_idx),
                               torch.from_numpy(ret).permute(2, 0, 1))
