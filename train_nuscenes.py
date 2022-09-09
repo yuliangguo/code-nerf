@@ -31,6 +31,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--iters_all", dest="iters_all", default=1200000)
 
+
     args = arg_parser.parse_args()
 
     nusc_dataset = NuScenesData(

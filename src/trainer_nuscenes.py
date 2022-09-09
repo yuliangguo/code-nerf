@@ -213,7 +213,9 @@ class TrainerNuScenes:
                               torch.from_numpy(ret).permute(2, 0, 1))
 
     def set_optimizers(self):
-        lr1, lr2 = self.get_learning_rate()
+        # lr1, lr2 = self.get_learning_rate()
+        lr1 = 1e-4
+        lr2 = 1e-4
         self.opts = torch.optim.AdamW([
             {'params': self.model.parameters(), 'lr': lr1},
             {'params': self.shape_codes.parameters(), 'lr': lr2},
