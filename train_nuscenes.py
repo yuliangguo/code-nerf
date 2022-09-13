@@ -27,7 +27,8 @@ if __name__ == '__main__':
                             help="predicted panoptic segmentation onnuscenes dataset")
     arg_parser.add_argument("--nvsc_version", dest="nvsc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
-    arg_parser.add_argument("--batchsize", dest="batchsize", type=int, default=1800)
+    arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=3)
+    arg_parser.add_argument("--ray_samples", dest="ray_samples", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--iters_all", dest="iters_all", default=1200000)
 
@@ -43,12 +44,12 @@ if __name__ == '__main__':
         num_cams_per_sample=1,
         divisor=1000,
         box_iou_th=0.5,
-        mask_pixels=2*args.batchsize,
+        mask_pixels=2*args.ray_samples,
         img_h=900,
         img_w=1600,
         debug=False)
 
-    optimizer = TrainerNuScenes(args.nusc_cat, args.gpu, nusc_dataset,
-                                args.pretrained_model_dir, args.jsonfile,
-                                args.batchsize, num_workers=args.num_workers, shuffle=False)
-    optimizer.training(args.iters_all)
+    trainer = TrainerNuScenes(args.nusc_cat, args.gpu, nusc_dataset,
+                              args.pretrained_model_dir, args.jsonfile, args.batch_size,
+                              args.ray_samples, num_workers=args.num_workers, shuffle=True)
+    trainer.training(args.iters_all)

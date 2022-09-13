@@ -285,6 +285,7 @@ class NuScenesData:
         return self.lenids
     
     def __getitem__(self, idx):
+        sample_data = {}
         instoken = self.instokens[idx]
         anntoken = self.anntokens[idx]
         if self.debug:
@@ -293,8 +294,8 @@ class NuScenesData:
         # extract fixed number of qualified samples per instance
         imgs = []
         masks_occ = []
-        camera_poses = []
-        camera_intrinsics = []
+        cam_poses = []
+        cam_intrinsics = []
         rois = []  # used to sample rays
         valid_flags = []
 
@@ -356,8 +357,8 @@ class NuScenesData:
                         masks_occ.append(mask_occ.astype(np.int32))
                         # masks.append((pan_label == tgt_ins_id).astype(np.int32))
                         rois.append(box_2d)
-                        camera_intrinsics.append(camera_intrinsic)
-                        camera_poses.append(cam_pose)
+                        cam_intrinsics.append(camera_intrinsic)
+                        cam_poses.append(cam_pose)
                         valid_flags.append(1)
 
                         if self.debug:
@@ -388,18 +389,28 @@ class NuScenesData:
         if 'LIDAR_TOP' not in sample_record['data'].keys() or len(imgs) < self.num_cams_per_sample:
             for ii in range(len(imgs), self.num_cams_per_sample):
                 imgs.append(np.zeros((self.img_h, self.img_w, 3)))
-                masks_occ.append(np.zeros((self.img_h, self.img_w, 3)))
+                masks_occ.append(np.zeros((self.img_h, self.img_w)))
                 rois.append(np.array([-1, -1, -1, -1]))
-                camera_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
-                camera_poses.append(np.zeros((3, 4)).astype(np.float32))
+                cam_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
+                cam_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
-        return torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.), \
-               torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
-               torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-               torch.from_numpy(np.asarray(camera_intrinsics).astype(np.float32)), \
-               torch.from_numpy(np.asarray(camera_poses).astype(np.float32)), \
-               np.asarray(valid_flags), instoken, anntoken
+        sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
+        sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
+        sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
+        sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
+        sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        sample_data['valid_flags'] = np.asarray(valid_flags)
+        sample_data['instoken'] = instoken
+        sample_data['anntoken'] = anntoken
+
+        return sample_data
+        # return torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.), \
+        #        torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
+        #        torch.from_numpy(np.asarray(rois).astype(np.int32)), \
+        #        torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
+        #        torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
+        #        np.asarray(valid_flags), instoken, anntoken
 
     def get_ins_samples(self, instoken):
         # anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
@@ -408,8 +419,8 @@ class NuScenesData:
         # extract fixed number of qualified samples per instance
         imgs = []
         masks_occ = []
-        camera_poses = []
-        camera_intrinsics = []
+        cam_poses = []
+        cam_intrinsics = []
         rois = []  # used to sample rays
         out_anntokens = []
 
@@ -476,8 +487,8 @@ class NuScenesData:
                             masks_occ.append(mask_occ.astype(np.int32))
                             # masks.append((pan_label == tgt_ins_id).astype(np.int32))
                             rois.append(box_2d)
-                            camera_intrinsics.append(camera_intrinsic)
-                            camera_poses.append(cam_pose)
+                            cam_intrinsics.append(camera_intrinsic)
+                            cam_poses.append(cam_pose)
                             out_anntokens.append(anntoken)
 
                             if self.debug:
@@ -509,8 +520,8 @@ class NuScenesData:
             #     imgs.append(np.zeros((self.img_h, self.img_w, 3)))
             #     masks_occ.append(np.zeros((self.img_h, self.img_w, 3)))
             #     rois.append(np.array([-1, -1, -1, -1]))
-            #     camera_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
-            #     camera_poses.append(np.zeros((3, 4)).astype(np.float32))
+            #     cam_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
+            #     cam_poses.append(np.zeros((3, 4)).astype(np.float32))
 
         if len(imgs) == 0:
             return None, None, None, None, None, None
@@ -518,8 +529,8 @@ class NuScenesData:
         return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
                torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
                torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-               torch.from_numpy(np.asarray(camera_intrinsics).astype(np.float32)), \
-               torch.from_numpy(np.asarray(camera_poses).astype(np.float32)), \
+               torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
+               torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
                np.asarray(out_anntokens)
 
 
@@ -557,7 +568,7 @@ if __name__ == '__main__':
     valid_ann_total = 0
     valid_ins_dic = {}
     for ii, d in enumerate(dataloader):
-        imgs, masks, rois, camera_intrinsics, camera_poses, valid_flags, instoken, anntoken = d
+        imgs, masks, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
 
         num_valid_cam = np.sum(valid_flags.numpy())
         valid_ann_total += int(num_valid_cam > 0)

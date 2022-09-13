@@ -17,8 +17,8 @@ import math
 
 
 class TrainerNuScenes:
-    def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, jsonfile='srncar.json', batch_size=2048,
-                 num_workers=0, shuffle=False, check_iter=200, save_iter=10000):
+    def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, jsonfile='srncar.json', batch_size=2,
+                 ray_samples=2048, num_workers=0, shuffle=False, check_iter=200, save_iter=10000):
         """
         :param pretrained_model_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
@@ -31,8 +31,9 @@ class TrainerNuScenes:
             self.hpams = json.load(f)
         self.device = torch.device('cuda:' + str(gpu))
         self.nusc_dataset = nusc_dataset
-        self.dataloader = DataLoader(self.nusc_dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle)
-        self.B = batch_size
+        self.dataloader = DataLoader(self.nusc_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle)
+        self.batch_size = batch_size
+        self.B = ray_samples
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
         self.save_iter = save_iter
@@ -73,94 +74,70 @@ class TrainerNuScenes:
 
         self.set_optimizers()
         cam_id = 0
+        # optimized_batch = False
+        self.opts.zero_grad()
+        t1 = time.time()
+        losses_rgb = []
+        losses_occ = []
+        losses_reg = []
+        loss_total = torch.zeros(1).to(self.device)
         # Per object
-        for obj_idx, d in enumerate(self.dataloader):
+        for batch_idx, batch_data in enumerate(self.dataloader):
             if self.niter >= num_iters:
                 break
 
-            imgs, masks_occ, rois, camera_intrinsics, poses, valid_flags, instoken, anntoken = d
-            # tgt_imgs, tgt_poses, masks_occ, rois, camera_intrinsics, valid_flags = \
-            #     imgs[0, cam_id], poses[0, cam_id], masks_occ[0, cam_id], \
-            #     rois[0, cam_id], camera_intrinsics[0, cam_id], valid_flags[0, cam_id]
-            imgs, masks_occ, rois, camera_intrinsics, poses, valid_flags, instoken, anntoken = \
-                imgs[0], masks_occ[0], rois[0], camera_intrinsics[0], poses[0], valid_flags[0], instoken[0], anntoken[0]
+            for obj_idx, imgs in enumerate(batch_data['imgs']):
 
-            if np.sum(valid_flags.numpy()) == 0:
-                continue
+                masks_occ = batch_data['masks_occ'][obj_idx]
+                rois = batch_data['rois'][obj_idx]
+                cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
+                cam_poses = batch_data['cam_poses'][obj_idx]
+                valid_flags = batch_data['valid_flags'][obj_idx]
+                instoken = batch_data['instoken'][obj_idx]
+                anntoken = batch_data['anntoken'][obj_idx]
 
-            print(f'epoch: {self.nepoch}, num obj: {obj_idx}/{len(self.dataloader)}, niter: {self.niter}/{num_iters}')
-            obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
-            obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-            H, W = imgs.shape[1:3]
-            rois[:, 0:2] -= roi_margin
-            rois[:, 2:4] += roi_margin
-            rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
-            rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W-1))
-            rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H-1))
+                # skip unqualified sample
+                if np.sum(valid_flags.numpy()) == 0:
+                    continue
 
-            code_idx = self.instoken2idx[instoken]
-            code_idx = torch.as_tensor(code_idx).to(self.device)
-            shapecode = self.shape_codes(code_idx)
-            texturecode = self.texture_codes(code_idx)
+                print(f'epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}, obj: {obj_idx} is qualified')
+                obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
+                obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+                H, W = imgs.shape[1:3]
+                rois[:, 0:2] -= roi_margin
+                rois[:, 2:4] += roi_margin
+                rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
+                rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W-1))
+                rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H-1))
 
-            self.opts.zero_grad()
-            t1 = time.time()
-            loss_per_img = []
-        # for cam_id, cam_id in enumerate(cam_id):
-            tgt_img, tgt_pose, mask_occ, roi, K = \
-                imgs[cam_id], poses[cam_id], masks_occ[cam_id], rois[cam_id], camera_intrinsics[cam_id]
+                code_idx = self.instoken2idx[instoken]
+                code_idx = torch.as_tensor(code_idx).to(self.device)
+                shapecode = self.shape_codes(code_idx)
+                texturecode = self.texture_codes(code_idx)
 
-            # near and far sample range need to be adaptively calculated
-            near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
-            far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
 
-            rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
+                tgt_img, tgt_pose, mask_occ, roi, K = \
+                    imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
 
-            # For different sized roi, extract a random subset of pixels with fixed batch size
-            n_rays = np.minimum(rays_o.shape[0], self.B)
-            random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
-            rays_o = rays_o[random_ray_ids]
-            viewdir = viewdir[random_ray_ids]
-            # The random selection should be within the roi pixels
-            tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 3)
-            mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 1)
-            tgt_img = tgt_img[random_ray_ids].to(self.device)
-            mask_occ = mask_occ[random_ray_ids].to(self.device)
-            mask_rgb = torch.clone(mask_occ)
-            mask_rgb[mask_rgb < 0] = 0
-
-            xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                    self.hpams['N_samples'])
-            # TODO: how the object space is normalized and transferred shape net
-            xyz /= obj_diag
-            xyz = xyz[:, :, [1, 0, 2]]
-            viewdir = viewdir[:, :, [1, 0, 2]]
-
-            sigmas, rgbs = self.model(xyz.to(self.device),
-                                      viewdir.to(self.device),
-                                      shapecode, texturecode)
-            rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
-            loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-            # Occupancy loss is essential, the BG portion adjust the nerf as well
-            loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-            reg_loss = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-            loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-            loss = loss_rgb + 1e-5 * loss_occ + loss_reg
-            loss.backward()
-            loss_per_img.append(loss_rgb.item())
-
-            self.opts.step()
-            self.log_psnr_time(np.mean(loss_per_img), time.time() - t1, obj_idx)
-            self.log_regloss(reg_loss, obj_idx)
-            self.optimized_idx[code_idx.item()] = 1
-
-            # Just use the cropped region instead to save computation on the visualization
-            with torch.no_grad():
                 # near and far sample range need to be adaptively calculated
                 near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
                 far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
 
                 rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
+
+                # For different sized roi, extract a random subset of pixels with fixed batch size
+                n_rays = np.minimum(rays_o.shape[0], self.B)
+                random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
+                rays_o = rays_o[random_ray_ids]
+                viewdir = viewdir[random_ray_ids]
+                # The random selection should be within the roi pixels
+                tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 3)
+                mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 1)
+                tgt_img = tgt_img[random_ray_ids].to(self.device)
+                mask_occ = mask_occ[random_ray_ids].to(self.device)
+                mask_rgb = torch.clone(mask_occ)
+                mask_rgb[mask_rgb < 0] = 0
+
                 xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                         self.hpams['N_samples'])
                 # TODO: how the object space is normalized and transferred shape net
@@ -168,48 +145,101 @@ class TrainerNuScenes:
                 xyz = xyz[:, :, [1, 0, 2]]
                 viewdir = viewdir[:, :, [1, 0, 2]]
 
-                generated_img = []
-                sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
-                for i in range(0, xyz.shape[0], sample_step):
-                    sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                              viewdir[i:i + sample_step].to(self.device),
-                                              shapecode, texturecode)
-                    rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                    generated_img.append(rgb_rays)
-                generated_img = torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3)
+                sigmas, rgbs = self.model(xyz.to(self.device),
+                                          viewdir.to(self.device),
+                                          shapecode, texturecode)
+                rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
+                loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                # Occupancy loss is essential, the BG portion adjust the nerf as well
+                loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
 
-            if self.niter % self.check_iter == 0:
-                # generated_img = torch.cat(generated_img)
-                # generated_img = generated_img.reshape(H,W,3)
-                # gtimg = imgs[0,-1].reshape(H,W,3)
-                # TODO: modify the log img including occ mask
-                gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
-                gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
-                self.log_img(generated_img, gt_img, gt_mask_occ, obj_idx)
-                print(-10*np.log(np.mean(loss_per_img))/np.log(10), self.niter)
+                losses_rgb.append(loss_rgb.item())
+                losses_occ.append(loss_occ.item())
+                losses_reg.append(loss_reg.item())
+                loss_total += (loss_rgb + 1e-4 * loss_occ + 1e-1 * loss_reg)
+                optimized_batch = True
+                self.optimized_idx[code_idx.item()] = 1
 
-            # if self.niter % self.hpams['check_points'] == 0:
-            if self.niter % self.save_iter == 0:
-                self.save_models(self.niter)
+                if self.niter % self.check_iter == 0:
+                    # Just use the cropped region instead to save computation on the visualization
+                    with torch.no_grad():
+                        # near and far sample range need to be adaptively calculated
+                        near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
+                        far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
 
-            # iterations are only counted after optimized an qualified sample
-            self.niter += 1
+                        rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
+                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
+                                                                self.hpams['N_samples'])
+                        # TODO: how the object space is normalized and transferred shape net
+                        xyz /= obj_diag
+                        xyz = xyz[:, :, [1, 0, 2]]
+                        viewdir = viewdir[:, :, [1, 0, 2]]
 
-    def log_psnr_time(self, loss_per_img, time_spent, obj_idx):
-        psnr = -10 * np.log(loss_per_img) / np.log(10)
-        self.writer.add_scalar('psnr/train', psnr, self.niter, obj_idx)
-        self.writer.add_scalar('time/train', time_spent, self.niter, obj_idx)
+                        generated_img = []
+                        sample_step = np.maximum(roi[2] - roi[0], roi[3] - roi[1])
+                        for i in range(0, xyz.shape[0], sample_step):
+                            sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
+                                                      viewdir[i:i + sample_step].to(self.device),
+                                                      shapecode, texturecode)
+                            rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+                            generated_img.append(rgb_rays)
+                        generated_img = torch.cat(generated_img).reshape(roi[3] - roi[1], roi[2] - roi[0], 3)
 
-    def log_regloss(self, loss_reg, obj_idx):
-        self.writer.add_scalar('reg/train', loss_reg, self.niter, obj_idx)
+                    # generated_img = torch.cat(generated_img)
+                    # generated_img = generated_img.reshape(H,W,3)
+                    # gtimg = imgs[0,-1].reshape(H,W,3)
+                    gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
+                    gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
+                    self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
+                    # print(-10*np.log(np.mean(losses_rgb))/np.log(10), self.niter)
 
-    def log_img(self, generated_img, gtimg, mask_occ, obj_idx):
+                if len(losses_rgb) == self.batch_size:
+                    print(f'    optimize niter: {self.niter}/{num_iters}')
+                    # optimize when collected a batch of qualified samples
+                    loss_total.backward()
+                    self.opts.step()
+                    self.log_losses(np.mean(losses_rgb), np.mean(losses_occ), np.mean(losses_reg), loss_total.item(), time.time() - t1)
+
+                    # reset all the losses
+                    self.opts.zero_grad()
+                    t1 = time.time()
+                    losses_rgb = []
+                    losses_occ = []
+                    losses_reg = []
+                    loss_total = torch.zeros(1).to(self.device)
+
+                    if self.niter % self.save_iter == 0:
+                        self.save_models(self.niter)
+
+                    # iterations are only counted after optimized an qualified batch
+                    self.niter += 1
+
+    def log_losses(self, loss_rgb, loss_occ, loss_reg, loss_total, time_spent):
+
+        psnr = -10 * np.log(loss_rgb) / np.log(10)
+        self.writer.add_scalar('psnr/train', psnr, self.niter)
+        self.writer.add_scalar('loss_rgb/train', loss_rgb, self.niter)
+        self.writer.add_scalar('loss_occ/train', loss_occ, self.niter)
+        self.writer.add_scalar('loss_reg/train', loss_reg, self.niter)
+        self.writer.add_scalar('loss_total/train', loss_total, self.niter)
+        self.writer.add_scalar('time/train', time_spent, self.niter)
+
+    # def log_psnr_time(self, loss_per_img, time_spent, obj_idx):
+    #     psnr = -10 * np.log(loss_per_img) / np.log(10)
+    #     self.writer.add_scalar('psnr/train', psnr, self.niter, obj_idx)
+    #     self.writer.add_scalar('time/train', time_spent, self.niter, obj_idx)
+    #
+    # def log_regloss(self, loss_reg, obj_idx):
+    #     self.writer.add_scalar('reg/train', loss_reg, self.niter, obj_idx)
+
+    def log_img(self, generated_img, gtimg, mask_occ, ann_token):
         H, W = generated_img.shape[:-1]
         ret = torch.zeros(H, 2 * W, 3)
         ret[:, :W, :] = generated_img
         ret[:, W:, :] = gtimg * 0.7 + mask_occ.unsqueeze(-1) * 0.3
         ret = image_float_to_uint8(ret.detach().cpu().numpy())
-        self.writer.add_image('train_' + str(self.niter) + '_' + str(obj_idx),
+        self.writer.add_image('train_' + str(self.niter) + '_' + ann_token,
                               torch.from_numpy(ret).permute(2, 0, 1))
 
     def set_optimizers(self):
@@ -257,7 +287,7 @@ class TrainerNuScenes:
         self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
 
     def make_savedir(self, save_dir):
-        self.save_dir = os.path.join('exps_nuscenes', save_dir)
+        self.save_dir = os.path.join(f'exps_nuscenes_bsize{self.batch_size}', save_dir)
         if not os.path.isdir(self.save_dir):
             os.makedirs(os.path.join(self.save_dir, 'runs'))
         self.writer = SummaryWriter(os.path.join(self.save_dir, 'runs'))

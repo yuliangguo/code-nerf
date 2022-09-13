@@ -1,4 +1,3 @@
-exps
-exps_nuscenes
+exps*
 .idea
 __pycache__
