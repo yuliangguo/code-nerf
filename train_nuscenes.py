@@ -23,7 +23,7 @@ if __name__ == '__main__':
                             default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                             help="nuscenes dataset dir")
     arg_parser.add_argument("--nusc_pan_dir", dest="nusc_pan_dir",
-                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
+                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
                             help="predicted panoptic segmentation onnuscenes dataset")
     arg_parser.add_argument("--nvsc_version", dest="nvsc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
@@ -31,7 +31,6 @@ if __name__ == '__main__':
     arg_parser.add_argument("--ray_samples", dest="ray_samples", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--iters_all", dest="iters_all", default=1200000)
-
 
     args = arg_parser.parse_args()
 

@@ -319,7 +319,7 @@ class NuScenesData:
                     img = np.asarray(img)
 
                     # visualize pred instance mask
-                    pan_file = os.path.join(self.nusc_pan_dir, cam, 'panoptic', os.path.basename(data_path)[:-4] + '.png')
+                    pan_file = os.path.join(self.nusc_pan_dir, cam, os.path.basename(data_path)[:-4] + '.png')
                     pan_img = np.asarray(Image.open(pan_file))
                     pan_label = img2pan(pan_img)
 
@@ -448,8 +448,7 @@ class NuScenesData:
                         img = np.asarray(img)
 
                         # visualize pred instance mask
-                        pan_file = os.path.join(self.nusc_pan_dir, cam, 'panoptic',
-                                                os.path.basename(data_path)[:-4] + '.png')
+                        pan_file = os.path.join(self.nusc_pan_dir, cam, os.path.basename(data_path)[:-4] + '.png')
                         pan_img = np.asarray(Image.open(pan_file))
                         pan_label = img2pan(pan_img)
 
@@ -544,7 +543,7 @@ if __name__ == '__main__':
         nusc_cat='vehicle.car',
         cs_cat='car',
         nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-        nusc_pan_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
+        nusc_pan_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
         nvsc_version='v1.0-mini',
         num_cams_per_sample=1,
         divisor=1000,
