@@ -17,14 +17,14 @@ if __name__ == '__main__':
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
-    arg_parser.add_argument("--cs_cat", dest="cs_cat", default='car',
-                            help="cityscape category name")
+    arg_parser.add_argument("--seg_cat", dest="seg_cat", default='car',
+                            help="predicted segment category name")
     arg_parser.add_argument("--nusc_data_dir", dest="nusc_data_dir",
                             default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                             help="nuscenes dataset dir")
-    arg_parser.add_argument("--nusc_pan_dir", dest="nusc_pan_dir",
+    arg_parser.add_argument("--nusc_seg_dir", dest="nusc_seg_dir",
                             default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
-                            help="predicted panoptic segmentation onnuscenes dataset")
+                            help="predicted segmentation on nuscenes dataset")
     arg_parser.add_argument("--nvsc_version", dest="nvsc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=3)
@@ -36,9 +36,9 @@ if __name__ == '__main__':
 
     nusc_dataset = NuScenesData(
         nusc_cat=args.nusc_cat,
-        cs_cat=args.cs_cat,
+        seg_cat=args.seg_cat,
         nusc_data_dir=args.nusc_data_dir,
-        nusc_pan_dir=args.nusc_pan_dir,
+        nusc_seg_dir=args.nusc_seg_dir,
         nvsc_version=args.nvsc_version,
         num_cams_per_sample=1,
         divisor=1000,

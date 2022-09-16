@@ -2,7 +2,7 @@
 import imageio
 import numpy as np
 import torch
-# import json
+import json
 # from torchvision import transforms
 import os
 import matplotlib.pyplot as plt
@@ -123,6 +123,16 @@ def pan2ins_vis(pan, cat_id, divisor):
     return img
 
 
+def ins2vis(masks):
+    masks = np.asarray(masks)
+    img = np.zeros((masks.shape[1], masks.shape[2], 3), dtype=np.float32)
+
+    for ins_id, mask in enumerate(masks):
+        yy, xx = np.where(mask > 0)
+        img[yy, xx, :] = _COLORS[ins_id % _COLORS.shape[0]]
+    return img
+
+
 def get_mask_occ_cityscape(pan, tgt_pan_id, divisor):
     """
         Prepare occupancy mask:
@@ -143,7 +153,17 @@ def get_mask_occ_cityscape(pan, tgt_pan_id, divisor):
     return mask_occ
 
 
-def get_tgt_ins(pan, cat_id, box, divisor=1000):
+def get_mask_occ_from_ins(masks, tgt_ins_id):
+    tgt_mask = masks[tgt_ins_id]
+    mask_occ = np.zeros_like(tgt_mask).astype(np.int32)
+    mask_union = np.sum(np.asarray(masks), axis=0)
+
+    mask_occ[mask_union == 0] = -1
+    mask_occ[tgt_mask > 0] = 1
+    return mask_occ
+
+
+def get_tgt_ins_from_pan(pan, cat_id, box, divisor=1000):
     # return the instance label and pixel counts in the box
     min_x, min_y, max_x, max_y = box
     box_pan = pan[int(min_y):int(max_y), int(min_x):int(max_x)]
@@ -188,6 +208,44 @@ def get_tgt_ins(pan, cat_id, box, divisor=1000):
     area_ratio = float(tgt_pixels_in_box) / box_area
     return tgt_ins_id, tgt_pixels_in_box, area_ratio, box_iou
 
+
+# TODO: iou can be calculated faster
+def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
+    # locate the detections matched the target category
+    indices = [idx for idx, label in enumerate(preds['labels']) if tgt_cat in label]
+    if len(indices) == 0:
+        return 0, 0, 0., 0.
+
+    boxes = np.asarray(preds['boxes'])[indices]
+
+    # calculate box ious between predicted boxed and tgt box
+    min_x, min_y, max_x, max_y = tgt_box
+    box_area = (max_x - min_x) * (max_y - min_y)
+    max_id = 0
+    box_iou = 0.0
+    for ii, pred_box in enumerate(boxes):
+        min_x2, min_y2, max_x2, max_y2 = pred_box
+        x_left = max(min_x, min_x2)
+        y_top = max(min_y, min_y2)
+        x_right = min(max_x, max_x2)
+        y_bottom = min(max_y, max_y2)
+
+        if x_right < x_left or y_bottom < y_top:
+            box_iou_i = 0.0
+        else:
+            intersection = (x_right - x_left) * (y_bottom - y_top)
+            union = box_area + (max_x2 - min_x2) * (max_y2 - min_y2) - intersection
+            box_iou_i = intersection / union
+
+        if box_iou_i > box_iou:
+            max_id = ii
+            box_iou = box_iou_i
+
+    tgt_ins_id = indices[max_id]
+    tgt_mask = masks[tgt_ins_id]
+    tgt_ins_cnt = np.sum((tgt_mask > 0).astype(np.int))
+    area_ratio = float(tgt_ins_cnt) / box_area
+    return tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou
 #
 # def get_tgt_ins(pan, cat_id, box, divisor=1000):
 #     # return the instance label and pixel counts in the box
@@ -230,9 +288,9 @@ def get_tgt_ins(pan, cat_id, box, divisor=1000):
 
 class NuScenesData:
     def __init__(self, nusc_cat='vehicle.car',
-                 cs_cat='car',
+                 seg_cat='car',
                  nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-                 nusc_pan_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
+                 nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
                  nvsc_version='v1.0-mini',
                  num_cams_per_sample=1,
                  divisor=1000,
@@ -249,7 +307,7 @@ class NuScenesData:
             Each annotation could be projected to multiple camera inputs at the same timestamp.
         """
         self.nusc_cat = nusc_cat
-        self.cs_cat = cs_cat
+        self.seg_cat = seg_cat
         self.divisor = divisor
         self.box_iou_th = box_iou_th
         self.mask_pixels = mask_pixels
@@ -258,7 +316,7 @@ class NuScenesData:
         self.debug = debug
 
         self.nusc_data_dir = nusc_data_dir
-        self.nusc_pan_dir = nusc_pan_dir
+        self.nusc_seg_dir = nusc_seg_dir
         self.nusc = NuScenes(version=nvsc_version, dataroot=nusc_data_dir, verbose=True)
         # self.nusc.list_scenes()
         instance_all = self.nusc.instance
@@ -299,6 +357,7 @@ class NuScenesData:
         rois = []  # used to sample rays
         valid_flags = []
 
+        # TODO: apply different parsing depending on the segmentation type
         # For each annotation (one annotation per timestamp) get all the sensors
         sample_ann = self.nusc.get('sample_annotation', anntoken)
         sample_record = self.nusc.get('sample', sample_ann['sample_token'])
@@ -318,11 +377,6 @@ class NuScenesData:
                     img = Image.open(data_path)
                     img = np.asarray(img)
 
-                    # visualize pred instance mask
-                    pan_file = os.path.join(self.nusc_pan_dir, cam, os.path.basename(data_path)[:-4] + '.png')
-                    pan_img = np.asarray(Image.open(pan_file))
-                    pan_label = img2pan(pan_img)
-
                     # box here is in sensor coordinate system
                     box = boxes[0]
                     # compute the camera pose in object frame, make sure dataset and model definitions consistent
@@ -341,19 +395,37 @@ class NuScenesData:
                     min_y = np.min(corners[1, :])
                     max_y = np.max(corners[1, :])
                     box_2d = [min_x, min_y, max_x, max_y]
-                    tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins(pan_label,
-                                                                               name2label[self.cs_cat][2],
-                                                                               box_2d,
-                                                                               self.divisor)
-                    if self.debug:
-                        print(
-                            f'        tgt instance id: {tgt_ins_id}, '
-                            f'num of pixels: {tgt_ins_cnt}, '
-                            f'area ratio: {area_ratio}, '
-                            f'box_iou: {box_iou}')
+
+                    if 'panoptic' in self.nusc_seg_dir:
+                        pan_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + '.png')
+                        pan_img = np.asarray(Image.open(pan_file))
+                        pan_label = img2pan(pan_img)
+                        tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins_from_pan(pan_label,
+                                                                                            name2label[self.seg_cat][2],
+                                                                                            box_2d,
+                                                                                            self.divisor)
+                        mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
+
+                    elif 'instance' in self.nusc_seg_dir:
+                        json_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + '.json')
+                        preds = json.load(open(json_file))
+                        ins_masks = []
+                        for box_id in range(0, len(preds['boxes'])):
+                            mask_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + f'_{box_id}.png')
+                            mask = np.asarray(Image.open(mask_file))
+                            ins_masks.append(mask)
+
+                        tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins_from_pred(preds,
+                                                                                             ins_masks,
+                                                                                             self.seg_cat,
+                                                                                             box_2d)
+                        if len(ins_masks) == 0:
+                            mask_occ = None
+                        else:
+                            mask_occ = get_mask_occ_from_ins(ins_masks, tgt_ins_id)
+
                     if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
                         imgs.append(img)
-                        mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
                         masks_occ.append(mask_occ.astype(np.int32))
                         # masks.append((pan_label == tgt_ins_id).astype(np.int32))
                         rois.append(box_2d)
@@ -362,6 +434,12 @@ class NuScenesData:
                         valid_flags.append(1)
 
                         if self.debug:
+                            print(
+                                f'        tgt instance id: {tgt_ins_id}, '
+                                f'num of pixels: {tgt_ins_cnt}, '
+                                f'area ratio: {area_ratio}, '
+                                f'box_iou: {box_iou}')
+
                             camtoken = sample_record['data'][cam]
                             fig, axes = plt.subplots(1, 2, figsize=(18, 9))
                             axes[0].imshow(img)
@@ -371,8 +449,11 @@ class NuScenesData:
                             c = np.array(self.nusc.colormap[box.name]) / 255.0
                             box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
 
-                            ins_vis = pan2ins_vis(pan_label, name2label[self.cs_cat][2], self.divisor)
-                            axes[1].imshow(ins_vis)
+                            if 'panoptic' in self.nusc_seg_dir:
+                                seg_vis = pan2ins_vis(pan_label, name2label[self.seg_cat][2], self.divisor)
+                            elif 'instance' in self.nusc_seg_dir:
+                                seg_vis = ins2vis(ins_masks)
+                            axes[1].imshow(seg_vis)
                             axes[1].set_title('pred instance')
                             axes[1].axis('off')
                             axes[1].set_aspect('equal')
@@ -405,15 +486,8 @@ class NuScenesData:
         sample_data['anntoken'] = anntoken
 
         return sample_data
-        # return torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.), \
-        #        torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
-        #        torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-        #        torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
-        #        torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
-        #        np.asarray(valid_flags), instoken, anntoken
 
     def get_ins_samples(self, instoken):
-        # anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
         anntokens = self.ins_ann_tokens[instoken]
 
         # extract fixed number of qualified samples per instance
@@ -437,7 +511,7 @@ class NuScenesData:
                 cams = np.random.permutation(cams)
                 for cam in cams:
                     if self.debug:
-                        print(f'     cam{cam}')
+                        print(f'     cam {cam}')
                     # TODO: consider BoxVisibility.ANY?
                     data_path, boxes, camera_intrinsic = self.nusc.get_sample_data(sample_record['data'][cam],
                                                                                    box_vis_level=BoxVisibility.ALL,
@@ -446,11 +520,6 @@ class NuScenesData:
                         # Plot CAMERA view.
                         img = Image.open(data_path)
                         img = np.asarray(img)
-
-                        # visualize pred instance mask
-                        pan_file = os.path.join(self.nusc_pan_dir, cam, os.path.basename(data_path)[:-4] + '.png')
-                        pan_img = np.asarray(Image.open(pan_file))
-                        pan_label = img2pan(pan_img)
 
                         # box here is in sensor coordinate system
                         box = boxes[0]
@@ -470,19 +539,39 @@ class NuScenesData:
                         min_y = np.min(corners[1, :])
                         max_y = np.max(corners[1, :])
                         box_2d = [min_x, min_y, max_x, max_y]
-                        tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins(pan_label,
-                                                                                   name2label[self.cs_cat][2],
-                                                                                   box_2d,
-                                                                                   self.divisor)
-                        if self.debug:
-                            print(
-                                f'        tgt instance id: {tgt_ins_id}, '
-                                f'num of pixels: {tgt_ins_cnt}, '
-                                f'area ratio: {area_ratio}, '
-                                f'box_iou: {box_iou}')
+
+                        if 'panoptic' in self.nusc_seg_dir:
+                            pan_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + '.png')
+                            pan_img = np.asarray(Image.open(pan_file))
+                            pan_label = img2pan(pan_img)
+                            tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins_from_pan(pan_label,
+                                                                                                name2label[
+                                                                                                    self.seg_cat][2],
+                                                                                                box_2d,
+                                                                                                self.divisor)
+                            mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
+
+                        elif 'instance' in self.nusc_seg_dir:
+                            json_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + '.json')
+                            preds = json.load(open(json_file))
+                            ins_masks = []
+                            for box_id in range(0, len(preds['boxes'])):
+                                mask_file = os.path.join(self.nusc_seg_dir, cam,
+                                                         os.path.basename(data_path)[:-4] + f'_{box_id}.png')
+                                mask = np.asarray(Image.open(mask_file))
+                                ins_masks.append(mask)
+
+                            tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins_from_pred(preds,
+                                                                                                 ins_masks,
+                                                                                                 self.seg_cat,
+                                                                                                 box_2d)
+                            if len(ins_masks) == 0:
+                                mask_occ = None
+                            else:
+                                mask_occ = get_mask_occ_from_ins(ins_masks, tgt_ins_id)
+
                         if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
                             imgs.append(img)
-                            mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
                             masks_occ.append(mask_occ.astype(np.int32))
                             # masks.append((pan_label == tgt_ins_id).astype(np.int32))
                             rois.append(box_2d)
@@ -491,6 +580,12 @@ class NuScenesData:
                             out_anntokens.append(anntoken)
 
                             if self.debug:
+                                print(
+                                    f'        tgt instance id: {tgt_ins_id}, '
+                                    f'num of pixels: {tgt_ins_cnt}, '
+                                    f'area ratio: {area_ratio}, '
+                                    f'box_iou: {box_iou}')
+
                                 camtoken = sample_record['data'][cam]
                                 fig, axes = plt.subplots(1, 2, figsize=(18, 9))
                                 axes[0].imshow(img)
@@ -500,8 +595,11 @@ class NuScenesData:
                                 c = np.array(self.nusc.colormap[box.name]) / 255.0
                                 box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
 
-                                ins_vis = pan2ins_vis(pan_label, name2label[self.cs_cat][2], self.divisor)
-                                axes[1].imshow(ins_vis)
+                                if 'panoptic' in self.nusc_seg_dir:
+                                    seg_vis = pan2ins_vis(pan_label, name2label[self.seg_cat][2], self.divisor)
+                                elif 'instance' in self.nusc_seg_dir:
+                                    seg_vis = ins2vis(ins_masks)
+                                axes[1].imshow(seg_vis)
                                 axes[1].set_title('pred instance')
                                 axes[1].axis('off')
                                 axes[1].set_aspect('equal')
@@ -510,17 +608,54 @@ class NuScenesData:
                                                          linewidth=2, edgecolor='y', facecolor='none')
                                 axes[1].add_patch(rect)
                                 plt.show()
+                        #
+                        # pan_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + '.png')
+                        # pan_img = np.asarray(Image.open(pan_file))
+                        # pan_label = img2pan(pan_img)
+                        #
+                        # tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins_from_pan(pan_label,
+                        #                                                                     name2label[self.seg_cat][2],
+                        #                                                                     box_2d,
+                        #                                                                     self.divisor)
+                        # if self.debug:
+                        #     print(
+                        #         f'        tgt instance id: {tgt_ins_id}, '
+                        #         f'num of pixels: {tgt_ins_cnt}, '
+                        #         f'area ratio: {area_ratio}, '
+                        #         f'box_iou: {box_iou}')
+                        # if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
+                        #     imgs.append(img)
+                        #     mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
+                        #     masks_occ.append(mask_occ.astype(np.int32))
+                        #     # masks.append((pan_label == tgt_ins_id).astype(np.int32))
+                        #     rois.append(box_2d)
+                        #     cam_intrinsics.append(camera_intrinsic)
+                        #     cam_poses.append(cam_pose)
+                        #     out_anntokens.append(anntoken)
+                        #
+                        #     if self.debug:
+                        #         camtoken = sample_record['data'][cam]
+                        #         fig, axes = plt.subplots(1, 2, figsize=(18, 9))
+                        #         axes[0].imshow(img)
+                        #         axes[0].set_title(self.nusc.get('sample_data', camtoken)['channel'])
+                        #         axes[0].axis('off')
+                        #         axes[0].set_aspect('equal')
+                        #         c = np.array(self.nusc.colormap[box.name]) / 255.0
+                        #         box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
+                        #
+                        #         ins_vis = pan2ins_vis(pan_label, name2label[self.seg_cat][2], self.divisor)
+                        #         axes[1].imshow(ins_vis)
+                        #         axes[1].set_title('pred instance')
+                        #         axes[1].axis('off')
+                        #         axes[1].set_aspect('equal')
+                        #         # c = np.array(nusc.colormap[box.name]) / 255.0
+                        #         rect = patches.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
+                        #                                  linewidth=2, edgecolor='y', facecolor='none')
+                        #         axes[1].add_patch(rect)
+                        #         plt.show()
 
                     if len(imgs) == 1:
                         break
-
-            # # fill the insufficient data slots
-            # if 'LIDAR_TOP' not in sample_record['data'].keys() or len(imgs) < 1:
-            #     imgs.append(np.zeros((self.img_h, self.img_w, 3)))
-            #     masks_occ.append(np.zeros((self.img_h, self.img_w, 3)))
-            #     rois.append(np.array([-1, -1, -1, -1]))
-            #     cam_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
-            #     cam_poses.append(np.zeros((3, 4)).astype(np.float32))
 
         if len(imgs) == 0:
             return None, None, None, None, None, None
@@ -541,9 +676,9 @@ if __name__ == '__main__':
 
     nusc_dataset = NuScenesData(
         nusc_cat='vehicle.car',
-        cs_cat='car',
+        seg_cat='car',
         nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-        nusc_pan_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
+        nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_instance',
         nvsc_version='v1.0-mini',
         num_cams_per_sample=1,
         divisor=1000,
@@ -566,16 +701,25 @@ if __name__ == '__main__':
     # Analysis of valid portion of data
     valid_ann_total = 0
     valid_ins_dic = {}
-    for ii, d in enumerate(dataloader):
-        imgs, masks, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
+    # for ii, d in enumerate(dataloader):
+    # imgs, masks, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
+    obj_idx = 0
+    for batch_idx, batch_data in enumerate(dataloader):
+        masks_occ = batch_data['masks_occ'][obj_idx]
+        rois = batch_data['rois'][obj_idx]
+        cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
+        cam_poses = batch_data['cam_poses'][obj_idx]
+        valid_flags = batch_data['valid_flags'][obj_idx]
+        instoken = batch_data['instoken'][obj_idx]
+        anntoken = batch_data['anntoken'][obj_idx]
 
         num_valid_cam = np.sum(valid_flags.numpy())
         valid_ann_total += int(num_valid_cam > 0)
-        if instoken[0] not in valid_ins_dic.keys():
-            valid_ins_dic[instoken[0]] = 0
+        if instoken[obj_idx] not in valid_ins_dic.keys():
+            valid_ins_dic[instoken[obj_idx]] = 0
         if num_valid_cam > 0:
-            valid_ins_dic[instoken[0]] = 1
-        print(f'Finish {ii} / {len(dataloader)}, valid samples: {num_valid_cam}')
+            valid_ins_dic[instoken[obj_idx]] = 1
+        print(f'Finish {batch_idx} / {len(dataloader)}, valid samples: {num_valid_cam}')
     print(f'Number of annotations having valid camera data support: {valid_ann_total} out of {len(dataloader)} annotations')
 
     valid_ins = [ins for ins in valid_ins_dic.keys() if valid_ins_dic[ins] == 1]

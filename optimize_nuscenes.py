@@ -17,18 +17,18 @@ if __name__ == '__main__':
                             help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
-    arg_parser.add_argument("--cs_cat", dest="cs_cat", default='car',
-                            help="cityscape category name")
+    arg_parser.add_argument("--seg_cat", dest="seg_cat", default='car',
+                            help="predicted segment category name")
     arg_parser.add_argument("--nusc_data_dir", dest="nusc_data_dir",
                             default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                             help="nuscenes dataset dir")
-    arg_parser.add_argument("--nusc_pan_dir", dest="nusc_pan_dir",
-                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
-                            help="predicted panoptic segmentation onnuscenes dataset")
+    arg_parser.add_argument("--nusc_seg_dir", dest="nusc_seg_dir",
+                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_instance',
+                            help="predicted segmentation on nuscenes dataset")
     arg_parser.add_argument("--nvsc_version", dest="nvsc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=10)  # Early overfit for single image
+    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=20)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=50)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
@@ -40,19 +40,19 @@ if __name__ == '__main__':
 
     nusc_dataset = NuScenesData(
         nusc_cat=args.nusc_cat,
-        cs_cat=args.cs_cat,
+        seg_cat=args.seg_cat,
         nusc_data_dir=args.nusc_data_dir,
-        nusc_pan_dir=args.nusc_pan_dir,
+        nusc_seg_dir=args.nusc_seg_dir,
         nvsc_version=args.nvsc_version,
         num_cams_per_sample=args.num_cams_per_sample,
         divisor=1000,
         box_iou_th=0.5,
-        mask_pixels=10000,
+        mask_pixels=2*args.batchsize,
         img_h=900,
         img_w=1600,
         debug=False)
 
-    save_postfix = '_nuscenes_multi'
+    save_postfix = '_nuscenes_multi_20220915'
     optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.jsonfile,
                                   args.batchsize, args.num_opts, args.num_cams_per_sample,
                                   num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
