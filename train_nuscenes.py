@@ -23,7 +23,7 @@ if __name__ == '__main__':
                             default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                             help="nuscenes dataset dir")
     arg_parser.add_argument("--nusc_seg_dir", dest="nusc_seg_dir",
-                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
+                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_instance',
                             help="predicted segmentation on nuscenes dataset")
     arg_parser.add_argument("--nvsc_version", dest="nvsc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
@@ -43,7 +43,7 @@ if __name__ == '__main__':
         num_cams_per_sample=1,
         divisor=1000,
         box_iou_th=0.5,
-        mask_pixels=2*args.ray_samples,
+        mask_pixels=3000,
         img_h=900,
         img_w=1600,
         debug=False)

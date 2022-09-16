@@ -47,7 +47,7 @@ if __name__ == '__main__':
         num_cams_per_sample=args.num_cams_per_sample,
         divisor=1000,
         box_iou_th=0.5,
-        mask_pixels=2*args.batchsize,
+        mask_pixels=3000,
         img_h=900,
         img_w=1600,
         debug=False)

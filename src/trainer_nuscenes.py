@@ -18,7 +18,7 @@ import math
 
 class TrainerNuScenes:
     def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, jsonfile='srncar.json', batch_size=2,
-                 ray_samples=2048, num_workers=0, shuffle=False, check_iter=200, save_iter=10000):
+                 ray_samples=2048, num_workers=0, shuffle=False, check_iter=1000, save_iter=10000):
         """
         :param pretrained_model_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
