@@ -246,44 +246,6 @@ def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
     tgt_ins_cnt = np.sum((tgt_mask > 0).astype(np.int))
     area_ratio = float(tgt_ins_cnt) / box_area
     return tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou
-#
-# def get_tgt_ins(pan, cat_id, box, divisor=1000):
-#     # return the instance label and pixel counts in the box
-#     min_x, min_y, max_x, max_y = box
-#     box_pan = pan[int(min_y):int(max_y), int(min_x):int(max_x)]
-#     ins_ids, cnts = np.unique(box_pan, return_counts=True)
-#     tgt_ins_id = np.where((ins_ids // divisor) == cat_id)[0]
-#     if len(tgt_ins_id) == 0:
-#         return None, 0, 0, 0
-#
-#     ins_ids = ins_ids[tgt_ins_id]
-#     cnts = cnts[tgt_ins_id]
-#
-#     max_id = np.argmax(cnts)
-#     tgt_ins_id = ins_ids[max_id]
-#     tgt_pixels_in_box = cnts[max_id]
-#     box_area = (max_x - min_x) * (max_y - min_y)
-#     area_ratio = float(tgt_pixels_in_box) / box_area
-#
-#     # calculate box iou with the full instance mask (aim to remove occluded case)
-#     ins_y, ins_x = np.where(pan == tgt_ins_id)
-#     min_x2 = np.min(ins_x)
-#     max_x2 = np.max(ins_x)
-#     min_y2 = np.min(ins_y)
-#     max_y2 = np.max(ins_y)
-#
-#     x_left = max(min_x, min_x2)
-#     y_top = max(min_y, min_y2)
-#     x_right = min(max_x, max_x2)
-#     y_bottom = min(max_y, max_y2)
-#
-#     if x_right < x_left or y_bottom < y_top:
-#         return tgt_ins_id, tgt_pixels_in_box, area_ratio, 0.0
-#
-#     intersection = (x_right - x_left) * (y_bottom - y_top)
-#     union = box_area + (max_x2 - min_x2) * (max_y2 - min_y2) - intersection
-#     box_iou = intersection/union
-#     return tgt_ins_id, tgt_pixels_in_box, area_ratio, box_iou
 
 
 class NuScenesData:
@@ -476,16 +438,27 @@ class NuScenesData:
                 cam_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
-        sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
-        sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
-        sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
-        sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
-        sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
-        sample_data['valid_flags'] = np.asarray(valid_flags)
-        sample_data['instoken'] = instoken
-        sample_data['anntoken'] = anntoken
+        # sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
+        # sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
+        # sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
+        # sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
+        # sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        # sample_data['valid_flags'] = np.asarray(valid_flags)
+        # sample_data['instoken'] = instoken
+        # sample_data['anntoken'] = anntoken
+        #
+        # return sample_data
 
-        return sample_data
+        imgs = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
+        masks_occ = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
+        rois = torch.from_numpy(np.asarray(rois).astype(np.int32))
+        cam_intrinsics = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
+        cam_poses = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        valid_flags = np.asarray(valid_flags)
+        instoken = instoken
+        anntoken = anntoken
+
+        return imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken
 
     def get_ins_samples(self, instoken):
         anntokens = self.ins_ann_tokens[instoken]

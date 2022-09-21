@@ -38,7 +38,7 @@ class OptimizerNuScenes:
         self.make_model()
         self.load_model_codes(model_dir)
         self.nusc_dataset = nusc_dataset
-        self.dataloader = DataLoader(self.nusc_dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle)
+        self.dataloader = DataLoader(self.nusc_dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         print('we are going to save at ', self.save_dir)
         #self.saved_dir = saved_dir
         self.B = batch_size
@@ -77,19 +77,18 @@ class OptimizerNuScenes:
         # cam_ids = torch.tensor(cam_ids)
         cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
         # Per object
-        for obj_dix, batch_data in enumerate(self.dataloader):
-            print(f'num obj: {obj_dix}/{len(self.dataloader)}')
-            # focal, H, W, imgs, poses, obj_idx = d
-            # imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
+        for batch_idx, batch_data in enumerate(self.dataloader):
+            print(f'num obj: {batch_idx}/{len(self.dataloader)}')
+            imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
 
-            imgs = batch_data['imgs']
-            masks_occ = batch_data['masks_occ']
-            rois = batch_data['rois']
-            cam_intrinsics = batch_data['cam_intrinsics']
-            cam_poses = batch_data['cam_poses']
-            valid_flags = batch_data['valid_flags']
-            instoken = batch_data['instoken']
-            anntoken = batch_data['anntoken']
+            # imgs = batch_data['imgs']
+            # masks_occ = batch_data['masks_occ']
+            # rois = batch_data['rois']
+            # cam_intrinsics = batch_data['cam_intrinsics']
+            # cam_poses = batch_data['cam_poses']
+            # valid_flags = batch_data['valid_flags']
+            # instoken = batch_data['instoken']
+            # anntoken = batch_data['anntoken']
 
             tgt_imgs, tgt_poses, masks_occ, rois, cam_intrinsics, valid_flags = \
                 imgs[0, cam_ids], cam_poses[0, cam_ids], masks_occ[0, cam_ids], \
@@ -154,17 +153,17 @@ class OptimizerNuScenes:
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     # loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    loss = loss_rgb + 1e-4 * loss_occ + 1e-1 * loss_reg
                     loss.backward()
-                    loss_per_img.append(loss_rgb.item())
+                    loss_per_img.append(loss_rgb.detach().item())
                     # Different roi sizes are dealt in save_image later
                     gt_imgs.append(tgt_imgs[num, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_dix,
-                                       obj_dix)
-                self.log_regloss(loss_reg.item(), self.nopts, obj_dix)
+                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
+                                       batch_idx)
+                self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -206,7 +205,7 @@ class OptimizerNuScenes:
             self.optimized_texturecodes[instoken] = texturecode.detach().cpu()
             self.optimized_ins_flag[instoken] = 1
             self.optimized_ann_flag[anntoken] = 1
-            self.save_opts(obj_dix)
+            self.save_opts(batch_idx)
 
     def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=50, save_img=True, roi_margin=5):
         """
@@ -286,9 +285,9 @@ class OptimizerNuScenes:
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     # loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    loss = loss_rgb + 1e-4 * loss_occ + 1e-1 * loss_reg
                     loss.backward()
-                    loss_per_img.append(loss_rgb.item())
+                    loss_per_img.append(loss_rgb.detach().item())
 
                     # Different roi sizes are dealt in save_image later
                     gt_imgs.append(tgt_imgs[num, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
@@ -298,7 +297,7 @@ class OptimizerNuScenes:
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
                                        obj_idx)
-                self.log_regloss(loss_reg.item(), self.nopts, obj_idx)
+                self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):

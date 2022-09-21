@@ -31,7 +31,7 @@ class TrainerNuScenes:
             self.hpams = json.load(f)
         self.device = torch.device('cuda:' + str(gpu))
         self.nusc_dataset = nusc_dataset
-        self.dataloader = DataLoader(self.nusc_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle)
+        self.dataloader = DataLoader(self.nusc_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         self.batch_size = batch_size
         self.B = ray_samples
         self.niter, self.nepoch = 0, 0
@@ -86,15 +86,26 @@ class TrainerNuScenes:
             if self.niter >= num_iters:
                 break
 
-            for obj_idx, imgs in enumerate(batch_data['imgs']):
+            imgs_b, masks_occ_b, rois_b, cam_intrinsics_b, cam_poses_b, valid_flags_b, instoken_b, anntoken_b = batch_data
+            for obj_idx, imgs in enumerate(imgs_b):
+                imgs = imgs_b[obj_idx]
+                masks_occ = masks_occ_b[obj_idx]
+                rois = rois_b[obj_idx]
+                cam_intrinsics = cam_intrinsics_b[obj_idx]
+                cam_poses = cam_poses_b[obj_idx]
+                valid_flags = valid_flags_b[obj_idx]
+                instoken = instoken_b[obj_idx]
+                anntoken = anntoken_b[obj_idx]
 
-                masks_occ = batch_data['masks_occ'][obj_idx]
-                rois = batch_data['rois'][obj_idx]
-                cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
-                cam_poses = batch_data['cam_poses'][obj_idx]
-                valid_flags = batch_data['valid_flags'][obj_idx]
-                instoken = batch_data['instoken'][obj_idx]
-                anntoken = batch_data['anntoken'][obj_idx]
+            # for obj_idx, imgs in enumerate(batch_data['imgs']):
+            #
+            #     masks_occ = batch_data['masks_occ'][obj_idx]
+            #     rois = batch_data['rois'][obj_idx]
+            #     cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
+            #     cam_poses = batch_data['cam_poses'][obj_idx]
+            #     valid_flags = batch_data['valid_flags'][obj_idx]
+            #     instoken = batch_data['instoken'][obj_idx]
+            #     anntoken = batch_data['anntoken'][obj_idx]
 
                 # skip unqualified sample
                 if np.sum(valid_flags.numpy()) == 0:
@@ -114,7 +125,6 @@ class TrainerNuScenes:
                 code_idx = torch.as_tensor(code_idx).to(self.device)
                 shapecode = self.shape_codes(code_idx)
                 texturecode = self.texture_codes(code_idx)
-
 
                 tgt_img, tgt_pose, mask_occ, roi, K = \
                     imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
@@ -153,12 +163,12 @@ class TrainerNuScenes:
                 # Occupancy loss is essential, the BG portion adjust the nerf as well
                 loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-
-                losses_rgb.append(loss_rgb.item())
-                losses_occ.append(loss_occ.item())
-                losses_reg.append(loss_reg.item())
                 loss_total += (loss_rgb + 1e-4 * loss_occ + 1e-1 * loss_reg)
-                optimized_batch = True
+
+                losses_rgb.append(loss_rgb.detach().item())
+                losses_occ.append(loss_occ.detach().item())
+                losses_reg.append(loss_reg.detach().item())
+                # optimized_batch = True
                 self.optimized_idx[code_idx.item()] = 1
 
                 if self.niter % self.check_iter == 0:
@@ -199,7 +209,7 @@ class TrainerNuScenes:
                     # optimize when collected a batch of qualified samples
                     loss_total.backward()
                     self.opts.step()
-                    self.log_losses(np.mean(losses_rgb), np.mean(losses_occ), np.mean(losses_reg), loss_total.item(), time.time() - t1)
+                    self.log_losses(np.mean(losses_rgb), np.mean(losses_occ), np.mean(losses_reg), loss_total.detach().item(), time.time() - t1)
 
                     # reset all the losses
                     self.opts.zero_grad()
