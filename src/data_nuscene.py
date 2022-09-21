@@ -252,8 +252,8 @@ class NuScenesData:
     def __init__(self, nusc_cat='vehicle.car',
                  seg_cat='car',
                  nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-                 nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/panoptic_pred',
-                 nvsc_version='v1.0-mini',
+                 nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
+                 nusc_version='v1.0-mini',
                  num_cams_per_sample=1,
                  divisor=1000,
                  box_iou_th=0.5,
@@ -279,7 +279,7 @@ class NuScenesData:
 
         self.nusc_data_dir = nusc_data_dir
         self.nusc_seg_dir = nusc_seg_dir
-        self.nusc = NuScenes(version=nvsc_version, dataroot=nusc_data_dir, verbose=True)
+        self.nusc = NuScenes(version=nusc_version, dataroot=nusc_data_dir, verbose=True)
         # self.nusc.list_scenes()
         instance_all = self.nusc.instance
         # self.tgt_instance_list = []
@@ -438,27 +438,27 @@ class NuScenesData:
                 cam_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
-        # sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
-        # sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
-        # sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
-        # sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
-        # sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
-        # sample_data['valid_flags'] = np.asarray(valid_flags)
-        # sample_data['instoken'] = instoken
-        # sample_data['anntoken'] = anntoken
+        sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
+        sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
+        sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
+        sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
+        sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        sample_data['valid_flags'] = np.asarray(valid_flags)
+        sample_data['instoken'] = instoken
+        sample_data['anntoken'] = anntoken
+
+        return sample_data
+
+        # imgs = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
+        # masks_occ = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
+        # rois = torch.from_numpy(np.asarray(rois).astype(np.int32))
+        # cam_intrinsics = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
+        # cam_poses = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        # valid_flags = np.asarray(valid_flags)
+        # instoken = instoken
+        # anntoken = anntoken
         #
-        # return sample_data
-
-        imgs = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
-        masks_occ = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
-        rois = torch.from_numpy(np.asarray(rois).astype(np.int32))
-        cam_intrinsics = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
-        cam_poses = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
-        valid_flags = np.asarray(valid_flags)
-        instoken = instoken
-        anntoken = anntoken
-
-        return imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken
+        # return imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken
 
     def get_ins_samples(self, instoken):
         anntokens = self.ins_ann_tokens[instoken]
@@ -652,7 +652,7 @@ if __name__ == '__main__':
         seg_cat='car',
         nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
         nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_instance',
-        nvsc_version='v1.0-mini',
+        nusc_version='v1.0-mini',
         num_cams_per_sample=1,
         divisor=1000,
         box_iou_th=0.5,

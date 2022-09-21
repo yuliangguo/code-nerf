@@ -79,16 +79,16 @@ class OptimizerNuScenes:
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
             print(f'num obj: {batch_idx}/{len(self.dataloader)}')
-            imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
+            # imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
 
-            # imgs = batch_data['imgs']
-            # masks_occ = batch_data['masks_occ']
-            # rois = batch_data['rois']
-            # cam_intrinsics = batch_data['cam_intrinsics']
-            # cam_poses = batch_data['cam_poses']
-            # valid_flags = batch_data['valid_flags']
-            # instoken = batch_data['instoken']
-            # anntoken = batch_data['anntoken']
+            imgs = batch_data['imgs']
+            masks_occ = batch_data['masks_occ']
+            rois = batch_data['rois']
+            cam_intrinsics = batch_data['cam_intrinsics']
+            cam_poses = batch_data['cam_poses']
+            valid_flags = batch_data['valid_flags']
+            instoken = batch_data['instoken']
+            anntoken = batch_data['anntoken']
 
             tgt_imgs, tgt_poses, masks_occ, rois, cam_intrinsics, valid_flags = \
                 imgs[0, cam_ids], cam_poses[0, cam_ids], masks_occ[0, cam_ids], \
