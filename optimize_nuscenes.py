@@ -28,18 +28,21 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=20)  # Early overfit for single image
+    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=30)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=50)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
     arg_parser.add_argument("--batchsize", dest="batchsize", type=int, default=1800)
-    arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
+    arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
+    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True)
 
     args = arg_parser.parse_args()
 
     nusc_seg_dir = os.path.join(args.nusc_data_dir, 'pred_' + args.seg_source)
     save_postfix = '_nuscenes_use_' + args.seg_source
+    if args.opt_pose:
+        save_postfix += '_opt_pose'
 
     nusc_dataset = NuScenesData(
         nusc_cat=args.nusc_cat,
@@ -53,10 +56,15 @@ if __name__ == '__main__':
         mask_pixels=3000,
         img_h=900,
         img_w=1600,
-        debug=False)
+        debug=False,
+        add_pose_err=args.opt_pose)
 
     optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.jsonfile,
                                   args.batchsize, args.num_opts, args.num_cams_per_sample,
                                   num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
     # optimizer.optimize_objs(args.lr, args.lr_half_interval, str2bool(args.save_img))
-    optimizer.optimize_objs_multi_anns(args.lr, args.lr_half_interval, str2bool(args.save_img))
+
+    if args.opt_pose:
+        optimizer.optimize_objs_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
+    else:
+        optimizer.optimize_objs_multi_anns(args.lr, args.lr_half_interval, str2bool(args.save_img))

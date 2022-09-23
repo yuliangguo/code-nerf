@@ -58,7 +58,7 @@ def sample_from_rays(ro, vd, near, far, N_samples, z_fixed=False):
     else:
         dist = (far - near) / (2*N_samples)
         z_vals = torch.linspace(near+dist, far-dist, N_samples).type_as(ro)
-        z_vals += torch.rand(N_samples) * (far - near) / (2*N_samples)
+        z_vals += (torch.rand(N_samples) * (far - near) / (2*N_samples)).type_as(ro)
     xyz = ro.unsqueeze(-2) + vd.unsqueeze(-2) * z_vals.unsqueeze(-1)
     vd = vd.unsqueeze(-2).repeat(1,N_samples,1)
     return xyz, vd, z_vals

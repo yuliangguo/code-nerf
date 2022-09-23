@@ -1,4 +1,4 @@
-
+import random
 import imageio
 import numpy as np
 import torch
@@ -260,6 +260,9 @@ class NuScenesData:
                  mask_pixels=10000,
                  img_h=900,
                  img_w=1600,
+                 add_pose_err=False,
+                 max_rot_pert=1.0,
+                 max_t_pert=0.01,
                  debug=False):
         """
             Provide camera input and label per annotation per instance for the target category
@@ -301,6 +304,12 @@ class NuScenesData:
         print(f'{self.lenids} annotations in {self.nusc_cat} category are included in dataloader.')
         self.num_cams_per_sample = num_cams_per_sample
 
+        # for adding error to pose
+        if add_pose_err:
+            self.add_pose_err = add_pose_err
+            self.max_rot_pert = max_rot_pert
+            self.max_t_pert = max_t_pert
+
     def __len__(self):
         return self.lenids
     
@@ -318,6 +327,7 @@ class NuScenesData:
         cam_intrinsics = []
         rois = []  # used to sample rays
         valid_flags = []
+        cam_poses_w_err = []
 
         # TODO: apply different parsing depending on the segmentation type
         # For each annotation (one annotation per timestamp) get all the sensors
@@ -345,11 +355,26 @@ class NuScenesData:
                     obj_center = box.center
                     obj_orientation = box.orientation.rotation_matrix
 
+                    if self.add_pose_err:
+                        # only consider yaw error and distance error
+                        yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
+                        rot_err = np.array([[np.cos(yaw_err), -np.sin(yaw_err), 0.],
+                                            [np.sin(yaw_err), np.cos(yaw_err), 0.],
+                                            [0., 0., 1.]]).astype(np.float32)
+                        trans_err_ratio = random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert)
+                        obj_center_w_err = obj_center * trans_err_ratio
+                        obj_orientation_w_err = obj_orientation @ rot_err
+                        R_c2o_w_err = obj_orientation_w_err.transpose()
+                        t_c2o_w_err = - R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
+                        cam_pose_w_err = np.concatenate([R_c2o_w_err, t_c2o_w_err], axis=1)
+                        # TODO: not synced with box_2d
+
                     # Compute camera pose in object frame = c2o transformation matrix
                     # Recall that object pose in camera frame = o2c transformation matrix
                     R_c2o = obj_orientation.transpose()
                     t_c2o = - R_c2o @ np.expand_dims(obj_center, -1)
                     cam_pose = np.concatenate([R_c2o, t_c2o], axis=1)
+
                     # find the valid instance given 2d box projection
                     corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
                     min_x = np.min(corners[0, :])
@@ -395,6 +420,9 @@ class NuScenesData:
                         cam_poses.append(cam_pose)
                         valid_flags.append(1)
 
+                        if self.add_pose_err:
+                            cam_poses_w_err.append(cam_pose_w_err)
+
                         if self.debug:
                             print(
                                 f'        tgt instance id: {tgt_ins_id}, '
@@ -438,6 +466,9 @@ class NuScenesData:
                 cam_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
+                if self.add_pose_err:
+                    cam_poses_w_err.append(np.zeros((3, 4)).astype(np.float32))
+
         sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
         sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
         sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
@@ -446,6 +477,9 @@ class NuScenesData:
         sample_data['valid_flags'] = np.asarray(valid_flags)
         sample_data['instoken'] = instoken
         sample_data['anntoken'] = anntoken
+
+        if self.add_pose_err:
+            sample_data['cam_poses_w_err'] = torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32))
 
         return sample_data
 
