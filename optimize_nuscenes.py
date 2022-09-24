@@ -28,9 +28,9 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=30)  # Early overfit for single image
+    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=40)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
-    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=50)
+    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=10)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
     arg_parser.add_argument("--batchsize", dest="batchsize", type=int, default=1800)
@@ -61,10 +61,10 @@ if __name__ == '__main__':
 
     optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.jsonfile,
                                   args.batchsize, args.num_opts, args.num_cams_per_sample,
-                                  num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
-    # optimizer.optimize_objs(args.lr, args.lr_half_interval, str2bool(args.save_img))
+                                  num_workers=args.num_workers, shuffle=True, save_postfix=save_postfix)
 
     if args.opt_pose:
         optimizer.optimize_objs_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
     else:
+        # optimizer.optimize_objs(args.lr, args.lr_half_interval, str2bool(args.save_img))
         optimizer.optimize_objs_multi_anns(args.lr, args.lr_half_interval, str2bool(args.save_img))

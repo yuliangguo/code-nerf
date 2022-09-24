@@ -261,8 +261,8 @@ class NuScenesData:
                  img_h=900,
                  img_w=1600,
                  add_pose_err=False,
-                 max_rot_pert=1.0,
-                 max_t_pert=0.01,
+                 max_rot_pert=0.5,
+                 max_t_pert=0.3,
                  debug=False):
         """
             Provide camera input and label per annotation per instance for the target category

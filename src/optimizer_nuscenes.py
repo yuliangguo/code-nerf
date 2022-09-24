@@ -68,7 +68,7 @@ class OptimizerNuScenes:
                 self.optimized_texturecodes[instoken] = self.mean_texture.detach().clone()
                 self.optimized_ins_flag[instoken] = 0
 
-    def optimize_objs(self, lr=1e-2, lr_half_interval=50, save_img=True, roi_margin=5):
+    def optimize_objs(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
         """
             Optimize on each annotation frame independently
         """
@@ -100,8 +100,12 @@ class OptimizerNuScenes:
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+            H, W = tgt_imgs.shape[1:3]
             rois[:, 0:2] -= roi_margin
             rois[:, 2:4] += roi_margin
+            rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
+            rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
+            rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
 
             self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
@@ -207,17 +211,18 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=50, save_img=True, roi_margin=5):
+    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
         """
             Optimize on each annotation frame independently
         """
 
         self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
+        code_stop_nopts = lr_half_interval  # stop updating codes early to focus on pose updates
+
         # cam_ids = torch.tensor(cam_ids)
         cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
-            print(f'num obj: {batch_idx}/{len(self.dataloader)}')
             # imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
 
             # the dataloader is supposed to provide cam_poses with error (converted from object poses for nerf)
@@ -238,11 +243,17 @@ class OptimizerNuScenes:
             if np.sum(valid_flags.numpy()) == 0:
                 continue
 
+            print(f'num obj: {batch_idx}/{len(self.dataloader)}')
+
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+            H, W = tgt_imgs.shape[1:3]
             rois[:, 0:2] -= roi_margin
             rois[:, 2:4] += roi_margin
+            rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
+            rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
+            rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
 
             self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
@@ -253,7 +264,7 @@ class OptimizerNuScenes:
             euler_angles_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(self.device).detach().requires_grad_()
 
             # First Optimize
-            self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec)
+            self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
                 t1 = time.time()
@@ -271,6 +282,7 @@ class OptimizerNuScenes:
                     near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
                     far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
 
+                    # TODO: should the roi change as pose2opt changes?
                     rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
 
                     # For different sized roi, extract a random subset of pixels with fixed batch size
@@ -351,16 +363,18 @@ class OptimizerNuScenes:
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
-                    self.set_optimizers(shapecode, texturecode)
+                    # self.set_optimizers(shapecode, texturecode)
+                    self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
 
             # Save the optimized codes
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
             self.optimized_texturecodes[instoken] = texturecode.detach().cpu()
             self.optimized_ins_flag[instoken] = 1
             self.optimized_ann_flag[anntoken] = 1
+            # TODO: evaluate poses and save poses
             self.save_opts(batch_idx)
 
-    def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=50, save_img=True, roi_margin=5):
+    def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
@@ -384,6 +398,12 @@ class OptimizerNuScenes:
 
             rois[..., 0:2] -= roi_margin
             rois[..., 2:4] += roi_margin
+            H, W = tgt_imgs.shape[1:3]
+            rois[..., 0:2] -= roi_margin
+            rois[..., 2:4] += roi_margin
+            rois[..., 0:2] = torch.maximum(rois[..., 0:2], torch.as_tensor(0))
+            rois[..., 2] = torch.minimum(rois[..., 2], torch.as_tensor(W - 1))
+            rois[..., 3] = torch.minimum(rois[..., 3], torch.as_tensor(H - 1))
 
             self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
@@ -499,7 +519,7 @@ class OptimizerNuScenes:
     def save_opts(self, num_obj):
         saved_dict = {
             'num_obj': num_obj,
-            'optimized_shapecodes' : self.optimized_shapecodes,
+            'optimized_shapecodes': self.optimized_shapecodes,
             'optimized_texturecodes': self.optimized_texturecodes,
             'psnr_eval': self.psnr_eval,
             'ssim_eval': self.ssim_eval
@@ -628,15 +648,22 @@ class OptimizerNuScenes:
             {'params': poses, 'lr': lr},
         ])
 
-    def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans):
+    def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans, code_stop_nopts=None):
         lr = self.get_learning_rate()
         #print(lr)
-        self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr},
-            {'params': euler_angles, 'lr': lr},
-            {'params': trans, 'lr': lr}
-        ])
+        # TODO: should all use different lr rate to optimize?
+        if code_stop_nopts is not None and self.nopts >= code_stop_nopts:
+            self.opts = torch.optim.AdamW([
+                {'params': euler_angles, 'lr': lr},
+                {'params': trans, 'lr': lr * 5}
+            ])
+        else:
+            self.opts = torch.optim.AdamW([
+                {'params': shapecode, 'lr': lr},
+                {'params': texturecode, 'lr': lr},
+                {'params': euler_angles, 'lr': lr * 5},
+                {'params': trans, 'lr':  lr * 5}
+            ])
 
     def get_learning_rate(self):
         opt_values = self.nopts // self.lr_half_interval
