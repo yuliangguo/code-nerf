@@ -28,7 +28,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=3)
-    arg_parser.add_argument("--ray_samples", dest="ray_samples", type=int, default=1600)
+    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
     arg_parser.add_argument("--iters_all", dest="iters_all", default=1200000)
 
@@ -53,5 +53,5 @@ if __name__ == '__main__':
 
     trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
                               args.pretrained_model_dir, args.jsonfile, args.batch_size,
-                              args.ray_samples, num_workers=args.num_workers, shuffle=True)
+                              args.n_rays, num_workers=args.num_workers, shuffle=True)
     trainer.training(args.iters_all)

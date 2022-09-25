@@ -18,8 +18,8 @@ import pytorch3d.transforms.rotation_conversions as rot_trans
 
 class OptimizerNuScenes:
     def __init__(self, model_dir, gpu, nusc_dataset, jsonfile='srncar.json',
-                 batch_size=2048, num_opts=200, num_cams_per_sample=1,
-                 max_rot_pert=0, max_t_pert=0, save_postfix='_nuscenes', num_workers=0, shuffle=False):
+                 n_rays=2048, num_opts=200, num_cams_per_sample=1,
+                 save_postfix='_nuscenes', num_workers=0, shuffle=False):
         """
         :param model_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
@@ -40,18 +40,11 @@ class OptimizerNuScenes:
         self.nusc_dataset = nusc_dataset
         self.dataloader = DataLoader(self.nusc_dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         print('we are going to save at ', self.save_dir)
-        #self.saved_dir = saved_dir
-        self.B = batch_size
+        self.n_rays = n_rays
         self.num_opts = num_opts
-        self.num_cams_per_sample = num_cams_per_sample
-        self.nviews = str(num_cams_per_sample)
-        self.psnr_eval = {}
-        self.psnr_opt = {}
-        self.ssim_eval = {}
-        self.R_eval = {}
-        self.T_eval = {}
-        self.max_rot_pert = max_rot_pert
-        self.max_t_pert = max_t_pert
+        # self.num_cams_per_sample = num_cams_per_sample
+        # self.nviews = str(num_cams_per_sample)
+
         # initialize shapecode, texturecode, poses to optimize
         self.optimized_shapecodes = {}
         self.optimized_texturecodes = {}
@@ -68,14 +61,21 @@ class OptimizerNuScenes:
                 self.optimized_texturecodes[instoken] = self.mean_texture.detach().clone()
                 self.optimized_ins_flag[instoken] = 0
 
+        # initialize evaluation scores
+        self.psnr_eval = {}
+        self.psnr_opt = {}
+        self.ssim_eval = {}
+        self.R_eval = {}
+        self.T_eval = {}
+
     def optimize_objs(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
         """
             Optimize on each annotation frame independently
         """
 
         self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
-        # cam_ids = torch.tensor(cam_ids)
-        cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
+        # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
+        cam_ids = [0]
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
             print(f'num obj: {batch_idx}/{len(self.dataloader)}')
@@ -129,7 +129,7 @@ class OptimizerNuScenes:
                     rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
 
                     # For different sized roi, extract a random subset of pixels with fixed batch size
-                    n_rays = np.minimum(rays_o.shape[0], self.B)
+                    n_rays = np.minimum(rays_o.shape[0], self.n_rays)
                     random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                     rays_o = rays_o[random_ray_ids]
                     viewdir = viewdir[random_ray_ids]
@@ -220,7 +220,8 @@ class OptimizerNuScenes:
         code_stop_nopts = lr_half_interval  # stop updating codes early to focus on pose updates
 
         # cam_ids = torch.tensor(cam_ids)
-        cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
+        # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
+        cam_ids = [0]
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
             # imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
@@ -265,6 +266,7 @@ class OptimizerNuScenes:
 
             # First Optimize
             self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+            est_poses = torch.zeros((1, 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
                 t1 = time.time()
@@ -286,7 +288,7 @@ class OptimizerNuScenes:
                     rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
 
                     # For different sized roi, extract a random subset of pixels with fixed batch size
-                    n_rays = np.minimum(rays_o.shape[0], self.B)
+                    n_rays = np.minimum(rays_o.shape[0], self.n_rays)
                     random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                     rays_o = rays_o[random_ray_ids]
                     viewdir = viewdir[random_ray_ids]
@@ -359,6 +361,11 @@ class OptimizerNuScenes:
                                 rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
                                 generated_img.append(rgb_rays)
                             generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
+
+                            # evaluate the pose err at last
+                            if self.nopts == (self.num_opts-1):
+                                est_poses[num] = pose2opt.detach().cpu()
+
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
 
                 self.nopts += 1
@@ -371,8 +378,9 @@ class OptimizerNuScenes:
             self.optimized_texturecodes[instoken] = texturecode.detach().cpu()
             self.optimized_ins_flag[instoken] = 1
             self.optimized_ann_flag[anntoken] = 1
-            # TODO: evaluate poses and save poses
-            self.save_opts(batch_idx)
+            self.log_eval_pose(est_poses, tgt_poses, anntoken)
+            print(f'R_error: {self.R_eval[anntoken]}, T_error: {self.T_eval[anntoken]}')
+            self.save_opts_w_pose(batch_idx)
 
     def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
         """
@@ -430,7 +438,7 @@ class OptimizerNuScenes:
                     rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
 
                     # For different sized roi, extract a random subset of pixels with fixed batch size
-                    n_rays = np.minimum(rays_o.shape[0], self.B)
+                    n_rays = np.minimum(rays_o.shape[0], self.n_rays)
                     random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                     rays_o = rays_o[random_ray_ids]
                     viewdir = viewdir[random_ray_ids]
@@ -522,21 +530,25 @@ class OptimizerNuScenes:
             'optimized_shapecodes': self.optimized_shapecodes,
             'optimized_texturecodes': self.optimized_texturecodes,
             'psnr_eval': self.psnr_eval,
-            'ssim_eval': self.ssim_eval
+            'ssim_eval': self.ssim_eval,
+            'optimized_ins_flag': self.optimized_ins_flag,
+            'optimized_ann_flag': self.optimized_ann_flag,
         }
         torch.save(saved_dict, os.path.join(self.save_dir, 'codes.pth'))
-        print('We finished the optimization of ' + str(num_obj))
+        # print('We finished the optimization of object' + str(num_obj))
 
     def save_opts_w_pose(self, num_obj):
         saved_dict = {
-            'num_obj' : num_obj,
+            'num_obj': num_obj,
             'optimized_shapecodes': self.optimized_shapecodes,
             'optimized_texturecodes': self.optimized_texturecodes,
             'optimized_poses': self.optimized_poses,
             'psnr_eval': self.psnr_eval,
             'ssim_eval': self.ssim_eval,
             'R_eval': self.R_eval,
-            'T_eval': self.T_eval
+            'T_eval': self.T_eval,
+            'optimized_ins_flag': self.optimized_ins_flag,
+            'optimized_ann_flag': self.optimized_ann_flag,
         }
         torch.save(saved_dict, os.path.join(self.save_dir, 'codes+poses.pth'))
         print('We finished the optimization of ' + str(num_obj))
@@ -564,7 +576,8 @@ class OptimizerNuScenes:
         save_img_dir = os.path.join(self.save_dir, obj_id)
         if not os.path.isdir(save_img_dir):
             os.makedirs(save_img_dir)
-        imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_{:03d}'.format(instance_num) + '.png'), ret)
+        # imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_{:03d}'.format(instance_num) + '.png'), ret)
+        imageio.imwrite(os.path.join(save_img_dir, 'opt' + '{:03d}'.format(instance_num) + '.png'), ret)
 
     def align_imgs_width(self, imgs, W, max_view=4):
         """
@@ -600,7 +613,7 @@ class OptimizerNuScenes:
         else:
             self.ssim_eval[obj_idx].append(ssim)
 
-    def log_eval_psnr(self, loss_per_img, niters, obj_idx):
+    def log_eval_psnr(self, loss_per_img, obj_idx):
         psnr = -10 * np.log(loss_per_img) / np.log(10)
         # if niters == 0:
         if self.psnr_eval.get(obj_idx) is None:
@@ -608,7 +621,7 @@ class OptimizerNuScenes:
         else:
             self.psnr_eval[obj_idx].append(psnr)
 
-    def log_eval_pose(self, est_poses, tgt_poses, obj_idx):
+    def log_eval_pose(self, est_poses, tgt_poses, ann_token):
         est_R = est_poses[:, :3, :3]
         est_T = est_poses[:, :3, 3]
         tgt_R = tgt_poses[:, :3, :3]
@@ -616,20 +629,22 @@ class OptimizerNuScenes:
 
         err_R = rot_dist(est_R, tgt_R)
         err_T = torch.sqrt(torch.sum((est_T - tgt_T)**2, dim=-1))
-        if self.R_eval.get(obj_idx) is None:
-            self.R_eval[obj_idx] = [err_R]
-            self.T_eval[obj_idx] = [err_T]
-        else:
-            self.R_eval[obj_idx].append(err_R)
-            self.T_eval[obj_idx].append(err_T)
+        self.R_eval[ann_token] = err_R
+        self.T_eval[ann_token] = err_T
+        # if self.R_eval.get(ann_token) is None:
+        #     self.R_eval[ann_token] = [err_R]
+        #     self.T_eval[ann_token] = [err_T]
+        # else:
+        #     self.R_eval[ann_token].append(err_R)
+        #     self.T_eval[ann_token].append(err_T)
 
     def log_opt_psnr_time(self, loss_per_img, time_spent, niters, obj_idx):
         psnr = -10*np.log(loss_per_img) / np.log(10)
-        self.writer.add_scalar('psnr_opt/' + self.nviews, psnr, niters, obj_idx)
-        self.writer.add_scalar('time_opt/' + self.nviews, time_spent, niters, obj_idx)
+        self.writer.add_scalar('psnr_opt/', psnr, niters, obj_idx)
+        self.writer.add_scalar('time_opt/', time_spent, niters, obj_idx)
 
     def log_regloss(self, loss_reg, niters, obj_idx):
-        self.writer.add_scalar('reg/' + self.nviews, loss_reg, niters, obj_idx)
+        self.writer.add_scalar('reg/', loss_reg, niters, obj_idx)
 
     def set_optimizers(self, shapecode, texturecode):
         lr = self.get_learning_rate()

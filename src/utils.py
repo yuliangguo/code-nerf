@@ -122,6 +122,11 @@ def str2bool(v):
 
 
 def rot_dist(R1, R2):
-    R_diff = torch.matmul(R1, torch.transpose(R2, 1, 2))
+    """
+    R1: B x 3 x 3
+    R2: B x 3 x 3
+    return B X 1
+    """
+    R_diff = torch.matmul(R1, torch.transpose(R2, -1, -2))
     trace = torch.tensor([torch.trace(R_diff_single) for R_diff_single in R_diff])
     return torch.acos((trace-1) / 2)

@@ -18,7 +18,7 @@ import math
 
 class TrainerNuScenes:
     def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, jsonfile='srncar.json', batch_size=2,
-                 ray_samples=2048, num_workers=0, shuffle=False, check_iter=1000, save_iter=10000):
+                 n_rays=2048, num_workers=0, shuffle=False, check_iter=1000, save_iter=10000):
         """
         :param pretrained_model_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
@@ -33,7 +33,7 @@ class TrainerNuScenes:
         self.nusc_dataset = nusc_dataset
         self.dataloader = DataLoader(self.nusc_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         self.batch_size = batch_size
-        self.B = ray_samples
+        self.n_rays = n_rays
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
         self.save_iter = save_iter
@@ -140,7 +140,7 @@ class TrainerNuScenes:
                 rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
 
                 # For different sized roi, extract a random subset of pixels with fixed batch size
-                n_rays = np.minimum(rays_o.shape[0], self.B)
+                n_rays = np.minimum(rays_o.shape[0], self.n_rays)
                 random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                 rays_o = rays_o[random_ray_ids]
                 viewdir = viewdir[random_ray_ids]
