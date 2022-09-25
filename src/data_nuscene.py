@@ -262,7 +262,7 @@ class NuScenesData:
                  img_w=1600,
                  add_pose_err=False,
                  max_rot_pert=0.5,
-                 max_t_pert=0.1,
+                 max_t_pert=0.3,
                  debug=False):
         """
             Provide camera input and label per annotation per instance for the target category
@@ -305,8 +305,8 @@ class NuScenesData:
         self.num_cams_per_sample = num_cams_per_sample
 
         # for adding error to pose
-        if add_pose_err:
-            self.add_pose_err = add_pose_err
+        self.add_pose_err = add_pose_err
+        if self.add_pose_err:
             self.max_rot_pert = max_rot_pert
             self.max_t_pert = max_t_pert
 
@@ -355,6 +355,7 @@ class NuScenesData:
                     obj_center = box.center
                     obj_orientation = box.orientation.rotation_matrix
 
+                    # ATTENTION: add Rot error in the object's coordinate, and T error
                     if self.add_pose_err:
                         # only consider yaw error and distance error
                         yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
@@ -365,7 +366,7 @@ class NuScenesData:
                         obj_center_w_err = obj_center * trans_err_ratio
                         obj_orientation_w_err = obj_orientation @ rot_err
                         R_c2o_w_err = obj_orientation_w_err.transpose()
-                        t_c2o_w_err = - R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
+                        t_c2o_w_err = -R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
                         cam_pose_w_err = np.concatenate([R_c2o_w_err, t_c2o_w_err], axis=1)
                         # TODO: not synced with box_2d
 

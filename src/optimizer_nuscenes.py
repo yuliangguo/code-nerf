@@ -329,6 +329,7 @@ class OptimizerNuScenes:
                 self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
+                # ATTENTION: the first visual is already after one iter of optimization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
                     # generate the full images
                     generated_imgs = []
@@ -665,19 +666,17 @@ class OptimizerNuScenes:
 
     def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans, code_stop_nopts=None):
         lr = self.get_learning_rate()
-        #print(lr)
-        # TODO: should all use different lr rate to optimize?
         if code_stop_nopts is not None and self.nopts >= code_stop_nopts:
             self.opts = torch.optim.AdamW([
                 {'params': euler_angles, 'lr': lr},
-                {'params': trans, 'lr': lr * 5}
+                {'params': trans, 'lr': lr*5}
             ])
         else:
             self.opts = torch.optim.AdamW([
                 {'params': shapecode, 'lr': lr},
                 {'params': texturecode, 'lr': lr},
-                {'params': euler_angles, 'lr': lr * 5},
-                {'params': trans, 'lr':  lr * 5}
+                {'params': euler_angles, 'lr': lr},
+                {'params': trans, 'lr':  lr*5}
             ])
 
     def get_learning_rate(self):
