@@ -502,6 +502,7 @@ class NuScenesData:
         imgs = []
         masks_occ = []
         cam_poses = []
+        cam_poses_w_err = []
         cam_intrinsics = []
         rois = []  # used to sample rays
         out_anntokens = []
@@ -534,6 +535,22 @@ class NuScenesData:
                         # compute the camera pose in object frame, make sure dataset and model definitions consistent
                         obj_center = box.center
                         obj_orientation = box.orientation.rotation_matrix
+
+                        # ATTENTION: add Rot error in the object's coordinate, and T error
+                        if self.add_pose_err:
+                            # only consider yaw error and distance error
+                            yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
+                            rot_err = np.array([[np.cos(yaw_err), -np.sin(yaw_err), 0.],
+                                                [np.sin(yaw_err), np.cos(yaw_err), 0.],
+                                                [0., 0., 1.]]).astype(np.float32)
+                            trans_err_ratio = random.uniform(1.0 - self.max_t_pert, 1.0 + self.max_t_pert)
+                            obj_center_w_err = obj_center * trans_err_ratio
+                            obj_orientation_w_err = obj_orientation @ rot_err
+                            R_c2o_w_err = obj_orientation_w_err.transpose()
+                            # ATTENTION: t_c2o_w_err is proportional to t_c2o because added error to R
+                            t_c2o_w_err = -R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
+                            cam_pose_w_err = np.concatenate([R_c2o_w_err, t_c2o_w_err], axis=1)
+                            # TODO: not synced with box_2d
 
                         # Compute camera pose in object frame = c2o transformation matrix
                         # Recall that object pose in camera frame = o2c transformation matrix
@@ -587,6 +604,9 @@ class NuScenesData:
                             cam_poses.append(cam_pose)
                             out_anntokens.append(anntoken)
 
+                            if self.add_pose_err:
+                                cam_poses_w_err.append(cam_pose_w_err)
+
                             if self.debug:
                                 print(
                                     f'        tgt instance id: {tgt_ins_id}, '
@@ -616,57 +636,23 @@ class NuScenesData:
                                                          linewidth=2, edgecolor='y', facecolor='none')
                                 axes[1].add_patch(rect)
                                 plt.show()
-                        #
-                        # pan_file = os.path.join(self.nusc_seg_dir, cam, os.path.basename(data_path)[:-4] + '.png')
-                        # pan_img = np.asarray(Image.open(pan_file))
-                        # pan_label = img2pan(pan_img)
-                        #
-                        # tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou = get_tgt_ins_from_pan(pan_label,
-                        #                                                                     name2label[self.seg_cat][2],
-                        #                                                                     box_2d,
-                        #                                                                     self.divisor)
-                        # if self.debug:
-                        #     print(
-                        #         f'        tgt instance id: {tgt_ins_id}, '
-                        #         f'num of pixels: {tgt_ins_cnt}, '
-                        #         f'area ratio: {area_ratio}, '
-                        #         f'box_iou: {box_iou}')
-                        # if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
-                        #     imgs.append(img)
-                        #     mask_occ = get_mask_occ_cityscape(pan_label, tgt_ins_id, self.divisor)
-                        #     masks_occ.append(mask_occ.astype(np.int32))
-                        #     # masks.append((pan_label == tgt_ins_id).astype(np.int32))
-                        #     rois.append(box_2d)
-                        #     cam_intrinsics.append(camera_intrinsic)
-                        #     cam_poses.append(cam_pose)
-                        #     out_anntokens.append(anntoken)
-                        #
-                        #     if self.debug:
-                        #         camtoken = sample_record['data'][cam]
-                        #         fig, axes = plt.subplots(1, 2, figsize=(18, 9))
-                        #         axes[0].imshow(img)
-                        #         axes[0].set_title(self.nusc.get('sample_data', camtoken)['channel'])
-                        #         axes[0].axis('off')
-                        #         axes[0].set_aspect('equal')
-                        #         c = np.array(self.nusc.colormap[box.name]) / 255.0
-                        #         box.render(axes[0], view=camera_intrinsic, normalize=True, colors=(c, c, c))
-                        #
-                        #         ins_vis = pan2ins_vis(pan_label, name2label[self.seg_cat][2], self.divisor)
-                        #         axes[1].imshow(ins_vis)
-                        #         axes[1].set_title('pred instance')
-                        #         axes[1].axis('off')
-                        #         axes[1].set_aspect('equal')
-                        #         # c = np.array(nusc.colormap[box.name]) / 255.0
-                        #         rect = patches.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
-                        #                                  linewidth=2, edgecolor='y', facecolor='none')
-                        #         axes[1].add_patch(rect)
-                        #         plt.show()
 
                     if len(imgs) == 1:
                         break
 
         if len(imgs) == 0:
+            if self.add_pose_err:
+                return None, None, None, None, None, None, None
             return None, None, None, None, None, None
+
+        if self.add_pose_err:
+            return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
+                   torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
+                   torch.from_numpy(np.asarray(rois).astype(np.int32)), \
+                   torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
+                   torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
+                   torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32)), \
+                   np.asarray(out_anntokens)
 
         return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
                torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \

@@ -35,12 +35,17 @@ if __name__ == '__main__':
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1800)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
-    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True)
+    arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
+                            help="if to optimize multiple annotations of the same instance jointly")
+    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True,
+                            help="if to optimize camera poses, if true the dataloader will generate erroneous poses")
 
     args = arg_parser.parse_args()
 
     nusc_seg_dir = os.path.join(args.nusc_data_dir, 'pred_' + args.seg_source)
     save_postfix = '_nuscenes_use_' + args.seg_source
+    if args.multi_ann_ops:
+        save_postfix += '_multi_ann'
     if args.opt_pose:
         save_postfix += '_opt_pose'
 
@@ -64,7 +69,12 @@ if __name__ == '__main__':
                                   num_workers=args.num_workers, shuffle=True, save_postfix=save_postfix)
 
     if args.opt_pose:
-        optimizer.optimize_objs_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
+        if args.multi_ann_ops:
+            optimizer.optimize_objs_multi_anns_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
+        else:
+            optimizer.optimize_objs_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
     else:
-        # optimizer.optimize_objs(args.lr, args.lr_half_interval, str2bool(args.save_img))
-        optimizer.optimize_objs_multi_anns(args.lr, args.lr_half_interval, str2bool(args.save_img))
+        if args.multi_ann_ops:
+            optimizer.optimize_objs_multi_anns(args.lr, args.lr_half_interval, str2bool(args.save_img))
+        else:
+            optimizer.optimize_objs(args.lr, args.lr_half_interval, str2bool(args.save_img))
