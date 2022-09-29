@@ -819,8 +819,8 @@ class OptimizerNuScenes:
         lr = self.get_learning_rate()
         #print(lr)
         self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr*2},
-            {'params': texturecode, 'lr': lr*5}
+            {'params': shapecode, 'lr': lr},
+            {'params': texturecode, 'lr': lr*2}
         ])
 
     # def set_optimizers_w_pose(self, shapecode, texturecode, poses):
@@ -841,10 +841,10 @@ class OptimizerNuScenes:
         #     ])
         # else:
         self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr*2},
-            {'params': texturecode, 'lr': lr*5},
-            {'params': euler_angles, 'lr': lr*2},
-            {'params': trans, 'lr':  lr*2}
+            {'params': shapecode, 'lr': lr},
+            {'params': texturecode, 'lr': lr*2},
+            {'params': euler_angles, 'lr': lr},
+            {'params': trans, 'lr':  lr}
         ])
 
     def get_learning_rate(self):

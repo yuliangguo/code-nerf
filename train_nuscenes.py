@@ -4,6 +4,7 @@ ROOT_DIR = os.path.abspath(os.path.join('', 'src'))
 sys.path.insert(0, os.path.join(ROOT_DIR))
 
 import argparse
+from datetime import date
 
 from src.trainer_nuscenes import TrainerNuScenes
 from src.data_nuscene import NuScenesData
@@ -28,14 +29,17 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=3)
-    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
+    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1400)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
     arg_parser.add_argument("--iters_all", dest="iters_all", default=1200000)
 
     args = arg_parser.parse_args()
 
     nusc_seg_dir = os.path.join(args.nusc_data_dir, 'pred_' + args.seg_source)
-    save_dir = args.nusc_cat + '.use_'+args.seg_source
+    today = date.today()
+    dt_str = today.strftime('_%Y_%m_%d')
+
+    save_dir = args.nusc_cat + '.use_' + args.seg_source + dt_str
 
     nusc_dataset = NuScenesData(
         nusc_cat=args.nusc_cat,

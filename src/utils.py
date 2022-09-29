@@ -80,7 +80,7 @@ def volume_rendering(sigmas, rgbs, z_vals, white_bg=True):
     return rgb_final, depth_final
 
 
-def volume_rendering2(sigmas, rgbs, z_vals, white_bg=False):
+def volume_rendering2(sigmas, rgbs, z_vals, white_bg=True):
     deltas = z_vals[1:] - z_vals[:-1]
     deltas = torch.cat([deltas, torch.ones_like(deltas[:1]) * 1e10])
     alphas = 1 - torch.exp(-sigmas.squeeze(-1) * deltas)
