@@ -155,9 +155,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    # loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    loss = loss_rgb + 1e-5 * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
                     # Different roi sizes are dealt in save_image later
@@ -167,7 +167,7 @@ class OptimizerNuScenes:
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
                                        batch_idx)
-                self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
+                # self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -314,9 +314,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    # loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    loss = loss_rgb + 1e-5 * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
                     # Different roi sizes are dealt in save_image later
@@ -326,7 +326,7 @@ class OptimizerNuScenes:
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
                                        batch_idx)
-                self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
+                # self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
                 # ATTENTION: the first visual is already after one iter of optimization
@@ -464,9 +464,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    # loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    loss = loss_rgb + 1e-5 * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -478,7 +478,7 @@ class OptimizerNuScenes:
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
                                        obj_idx)
-                self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
+                # self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -618,9 +618,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss_reg = self.hpams['loss_reg_coef'] * torch.mean(reg_loss)
-                    loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    # loss = loss_rgb + 1e-5 * loss_occ + 1e-4 * loss_reg
+                    loss = loss_rgb + 1e-5 * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -632,7 +632,7 @@ class OptimizerNuScenes:
                 self.opts.step()
                 self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
                                        obj_idx)
-                self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
+                # self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
