@@ -819,33 +819,33 @@ class OptimizerNuScenes:
         lr = self.get_learning_rate()
         #print(lr)
         self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr':lr}
+            {'params': shapecode, 'lr': lr*2},
+            {'params': texturecode, 'lr': lr*5}
         ])
 
-    def set_optimizers_w_pose(self, shapecode, texturecode, poses):
-        lr = self.get_learning_rate()
-        #print(lr)
-        self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr},
-            {'params': poses, 'lr': lr},
-        ])
+    # def set_optimizers_w_pose(self, shapecode, texturecode, poses):
+    #     lr = self.get_learning_rate()
+    #     #print(lr)
+    #     self.opts = torch.optim.AdamW([
+    #         {'params': shapecode, 'lr': lr},
+    #         {'params': texturecode, 'lr': lr},
+    #         {'params': poses, 'lr': lr},
+    #     ])
 
     def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans, code_stop_nopts=None):
         lr = self.get_learning_rate()
-        if code_stop_nopts is not None and self.nopts >= code_stop_nopts:
-            self.opts = torch.optim.AdamW([
-                {'params': euler_angles, 'lr': lr},
-                {'params': trans, 'lr': lr*5}
-            ])
-        else:
-            self.opts = torch.optim.AdamW([
-                {'params': shapecode, 'lr': lr},
-                {'params': texturecode, 'lr': lr},
-                {'params': euler_angles, 'lr': lr},
-                {'params': trans, 'lr':  lr*5}
-            ])
+        # if code_stop_nopts is not None and self.nopts >= code_stop_nopts:
+        #     self.opts = torch.optim.AdamW([
+        #         {'params': euler_angles, 'lr': lr},
+        #         {'params': trans, 'lr': lr}
+        #     ])
+        # else:
+        self.opts = torch.optim.AdamW([
+            {'params': shapecode, 'lr': lr*2},
+            {'params': texturecode, 'lr': lr*5},
+            {'params': euler_angles, 'lr': lr*2},
+            {'params': trans, 'lr':  lr*2}
+        ])
 
     def get_learning_rate(self):
         opt_values = self.nopts // self.lr_half_interval

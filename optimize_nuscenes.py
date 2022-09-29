@@ -28,14 +28,14 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truh")
     # arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=30)  # Early overfit for single image
+    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=32)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
-    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=10)
+    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=8)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
-    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1800)
+    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
-    arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
+    arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=False,
                             help="if to optimize multiple annotations of the same instance jointly")
     arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True,
                             help="if to optimize camera poses, if true the dataloader will generate erroneous poses")
@@ -57,8 +57,8 @@ if __name__ == '__main__':
         nusc_version=args.nusc_version,
         num_cams_per_sample=1,
         divisor=1000,
-        box_iou_th=0.5,
-        mask_pixels=3000,
+        box_iou_th=0.6,
+        mask_pixels=2500,
         img_h=900,
         img_w=1600,
         debug=False,

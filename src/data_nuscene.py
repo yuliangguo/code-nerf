@@ -178,6 +178,7 @@ def get_tgt_ins_from_pan(pan, cat_id, box, divisor=1000):
 
     max_id = 0
     box_iou = 0.0
+    area_ratio = 0.0
 
     for ii, ins_id in enumerate(ins_ids):
         # calculate box iou with the full instance mask (aim to remove occluded case)
@@ -202,10 +203,11 @@ def get_tgt_ins_from_pan(pan, cat_id, box, divisor=1000):
         if box_iou_i > box_iou:
             max_id = ii
             box_iou = box_iou_i
+            area_ratio = float(len(ins_y)) / (max_x2 - min_x2) / (max_y2 - min_y2)
 
     tgt_ins_id = ins_ids[max_id]
     tgt_pixels_in_box = cnts[max_id]
-    area_ratio = float(tgt_pixels_in_box) / box_area
+    # area_ratio = float(tgt_pixels_in_box) / box_area
     return tgt_ins_id, tgt_pixels_in_box, area_ratio, box_iou
 
 
@@ -244,7 +246,9 @@ def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
     tgt_ins_id = indices[max_id]
     tgt_mask = masks[tgt_ins_id]
     tgt_ins_cnt = np.sum((tgt_mask > 0).astype(np.int))
-    area_ratio = float(tgt_ins_cnt) / box_area
+    tgt_box = boxes[max_id]
+    tgt_bb_area = (tgt_box[2] - tgt_box[0]) * (tgt_box[3] - tgt_box[1])
+    area_ratio = float(tgt_ins_cnt) / tgt_bb_area
     return tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou
 
 
@@ -257,6 +261,7 @@ class NuScenesData:
                  num_cams_per_sample=1,
                  divisor=1000,
                  box_iou_th=0.5,
+                 max_dist=40,
                  mask_pixels=10000,
                  img_h=900,
                  img_w=1600,
@@ -275,6 +280,7 @@ class NuScenesData:
         self.seg_cat = seg_cat
         self.divisor = divisor
         self.box_iou_th = box_iou_th
+        self.max_dist = max_dist
         self.mask_pixels = mask_pixels
         self.img_h = img_h
         self.img_w = img_w
@@ -296,6 +302,14 @@ class NuScenesData:
                 # self.tgt_instance_list.append(instance)
                 anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
                 for anntoken in anntokens:
+                    # rule out those night samples
+                    sample_ann = self.nusc.get('sample_annotation', anntoken)
+                    sample_record = self.nusc.get('sample', sample_ann['sample_token'])
+                    scene = self.nusc.get('scene', sample_record['scene_token'])
+                    log_file = self.nusc.get('log', scene['log_token'])['logfile']
+                    log_items = log_file.split('-')
+                    if int(log_items[4]) >= 18:
+                        continue
                     self.instokens.append(instoken)
                     self.anntokens.append(anntoken)
                 self.ins_ann_tokens[instoken] = anntokens
@@ -412,7 +426,7 @@ class NuScenesData:
                         else:
                             mask_occ = get_mask_occ_from_ins(ins_masks, tgt_ins_id)
 
-                    if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
+                    if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th and area_ratio > self.box_iou_th and np.linalg.norm(obj_center) < self.max_dist:
                         imgs.append(img)
                         masks_occ.append(mask_occ.astype(np.int32))
                         # masks.append((pan_label == tgt_ins_id).astype(np.int32))
@@ -595,7 +609,7 @@ class NuScenesData:
                             else:
                                 mask_occ = get_mask_occ_from_ins(ins_masks, tgt_ins_id)
 
-                        if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th:
+                        if tgt_ins_id is not None and tgt_ins_cnt > self.mask_pixels and box_iou > self.box_iou_th and area_ratio > self.box_iou_th and np.linalg.norm(obj_center) < self.max_dist:
                             imgs.append(img)
                             masks_occ.append(mask_occ.astype(np.int32))
                             # masks.append((pan_label == tgt_ins_id).astype(np.int32))
@@ -676,8 +690,8 @@ if __name__ == '__main__':
         nusc_version='v1.0-mini',
         num_cams_per_sample=1,
         divisor=1000,
-        box_iou_th=0.5,
-        mask_pixels=3000,
+        box_iou_th=0.6,
+        mask_pixels=2500,
         img_h=900,
         img_w=1600,
         debug=True)
