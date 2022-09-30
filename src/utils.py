@@ -74,9 +74,9 @@ def volume_rendering(sigmas, rgbs, z_vals, white_bg=True):
     weights = alphas * accum_trans
     rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)
     depth_final = torch.sum(weights * z_vals, -1)
-    if white_bg:
-        weights_sum = weights.sum(1)
-        rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
+    # if white_bg:
+    #     weights_sum = weights.sum(1)
+    #     rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
     return rgb_final, depth_final
 
 
@@ -90,9 +90,9 @@ def volume_rendering2(sigmas, rgbs, z_vals, white_bg=True):
     weights = alphas * accum_trans
     rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)
     depth_final = torch.sum(weights * z_vals, -1)
-    if white_bg:
-        weights_sum = weights.sum(1)
-        rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
+    # if white_bg:
+    #     weights_sum = weights.sum(1)
+    #     rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
     return rgb_final, depth_final, accum_trans[:, -1]
 
 

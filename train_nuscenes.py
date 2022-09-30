@@ -49,7 +49,7 @@ if __name__ == '__main__':
         nusc_version=args.nusc_version,
         num_cams_per_sample=1,
         divisor=1000,
-        box_iou_th=0.6,
+        box_iou_th=0.5,
         mask_pixels=2500,
         img_h=900,
         img_w=1600,

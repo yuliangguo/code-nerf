@@ -144,9 +144,15 @@ class TrainerNuScenes:
                 random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
                 rays_o = rays_o[random_ray_ids]
                 viewdir = viewdir[random_ray_ids]
+
                 # The random selection should be within the roi pixels
                 tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 3)
                 mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 1)
+
+                # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
+                tgt_img = tgt_img * (mask_occ > 0)
+                tgt_img = tgt_img + (mask_occ < 0)
+
                 tgt_img = tgt_img[random_ray_ids].to(self.device)
                 mask_occ = mask_occ[random_ray_ids].to(self.device)
                 mask_rgb = torch.clone(mask_occ)
