@@ -55,6 +55,7 @@ if __name__ == '__main__':
         nusc_data_dir=args.nusc_data_dir,
         nusc_seg_dir=nusc_seg_dir,
         nusc_version=args.nusc_version,
+        split='val',
         num_cams_per_sample=1,
         divisor=1000,
         box_iou_th=0.5,

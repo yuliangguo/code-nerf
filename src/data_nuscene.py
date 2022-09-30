@@ -12,6 +12,7 @@ from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.geometry_utils import BoxVisibility, view_points
 from cityscapesscripts.helpers.labels import labels, name2label, trainId2label
 
+import data_splits_nusc
 
 # Reference: https://github.com/facebookresearch/detectron2/blob/master/detectron2/utils/colormap.py#L14
 _COLORS = np.array(
@@ -258,6 +259,7 @@ class NuScenesData:
                  nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                  nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
                  nusc_version='v1.0-mini',
+                 split='train',
                  num_cams_per_sample=1,
                  divisor=1000,
                  box_iou_th=0.5,
@@ -268,7 +270,8 @@ class NuScenesData:
                  add_pose_err=False,
                  max_rot_pert=0.5,
                  max_t_pert=0.3,
-                 debug=False):
+                 debug=False,
+                 ):
         """
             Provide camera input and label per annotation per instance for the target category
             Object 'Instance' here respects the definition from NuScene dataset.
@@ -306,6 +309,20 @@ class NuScenesData:
                     sample_ann = self.nusc.get('sample_annotation', anntoken)
                     sample_record = self.nusc.get('sample', sample_ann['sample_token'])
                     scene = self.nusc.get('scene', sample_record['scene_token'])
+                    if 'mini' in nusc_version:
+                        if split == 'train' and scene['name'] not in data_splits_nusc.mini_train:
+                            continue
+                        if split == 'val' and scene['name'] not in data_splits_nusc.mini_val:
+                            continue
+                    if 'trainval' in nusc_version:
+                        if split == 'train' and scene['name'] not in data_splits_nusc.train:
+                            continue
+                        if split == 'val' and scene['name'] not in data_splits_nusc.val:
+                            continue
+                    if 'test' in nusc_version:
+                        if split == 'test' and scene['name'] not in data_splits_nusc.test:
+                            continue
+
                     log_file = self.nusc.get('log', scene['log_token'])['logfile']
                     log_items = log_file.split('-')
                     if int(log_items[4]) >= 18:
