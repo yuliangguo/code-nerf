@@ -308,7 +308,7 @@ class TrainerNuScenes:
         self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
 
     def make_savedir(self, save_dir):
-        self.save_dir = os.path.join(f'exps_nuscenes_bsize{self.batch_size}', save_dir)
+        self.save_dir = os.path.join(f'exps_nuscenes', save_dir)
         if not os.path.isdir(self.save_dir):
             os.makedirs(os.path.join(self.save_dir, 'runs'))
         self.writer = SummaryWriter(os.path.join(self.save_dir, 'runs'))

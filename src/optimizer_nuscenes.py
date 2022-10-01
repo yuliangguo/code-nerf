@@ -38,6 +38,8 @@ class OptimizerNuScenes:
         self.device = torch.device('cuda:' + str(gpu))
         self.make_model()
         self.load_model_codes(model_dir)
+        self.make_save_img_dir(model_dir)
+        # self.make_writer()
         self.nusc_dataset = nusc_dataset
         self.dataloader = DataLoader(self.nusc_dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         print('we are going to save at ', self.save_dir)
@@ -172,8 +174,8 @@ class OptimizerNuScenes:
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
-                                       batch_idx)
+                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
+                #                        batch_idx)
                 # self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
@@ -337,8 +339,8 @@ class OptimizerNuScenes:
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
-                                       batch_idx)
+                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
+                #                        batch_idx)
                 # self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
@@ -495,8 +497,8 @@ class OptimizerNuScenes:
                     self.optimized_ann_flag[anntokens[num]] = 1
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
-                                       obj_idx)
+                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
+                #                        obj_idx)
                 # self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
@@ -655,8 +657,8 @@ class OptimizerNuScenes:
                     self.optimized_ann_flag[anntokens[num]] = 1
 
                 self.opts.step()
-                self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
-                                       obj_idx)
+                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
+                #                        obj_idx)
                 # self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
@@ -832,13 +834,13 @@ class OptimizerNuScenes:
         #     self.R_eval[ann_token].append(err_R)
         #     self.T_eval[ann_token].append(err_T)
 
-    def log_opt_psnr_time(self, loss_per_img, time_spent, niters, obj_idx):
-        psnr = -10*np.log(loss_per_img) / np.log(10)
-        self.writer.add_scalar('psnr_opt/', psnr, niters, obj_idx)
-        self.writer.add_scalar('time_opt/', time_spent, niters, obj_idx)
-
-    def log_regloss(self, loss_reg, niters, obj_idx):
-        self.writer.add_scalar('reg/', loss_reg, niters, obj_idx)
+    # def log_opt_psnr_time(self, loss_per_img, time_spent, niters, obj_idx):
+    #     psnr = -10*np.log(loss_per_img) / np.log(10)
+    #     self.writer.add_scalar('psnr_opt/', psnr, niters, obj_idx)
+    #     self.writer.add_scalar('time_opt/', time_spent, niters, obj_idx)
+    #
+    # def log_regloss(self, loss_reg, niters, obj_idx):
+    #     self.writer.add_scalar('reg/', loss_reg, niters, obj_idx)
 
     def set_optimizers(self, shapecode, texturecode):
         lr = self.get_learning_rate()
@@ -881,23 +883,21 @@ class OptimizerNuScenes:
         self.model = CodeNeRF(**self.hpams['net_hyperparams']).to(self.device)
 
     def load_model_codes(self, saved_dir):
-        saved_path = os.path.join('exps', saved_dir, 'models.pth')
-        saved_data = torch.load(saved_path, map_location = torch.device('cpu'))
-        self.make_save_img_dir(os.path.join('exps', saved_dir, 'test'))
-        self.make_writer(saved_dir)
+        saved_path = os.path.join(saved_dir, 'models.pth')
+        saved_data = torch.load(saved_path, map_location=torch.device('cpu'))
         self.model.load_state_dict(saved_data['model_params'])
         self.model = self.model.to(self.device)
         self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1,-1)
         self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
 
-    def make_writer(self, saved_dir):
-        self.writer = SummaryWriter(os.path.join('exps', saved_dir, 'test', 'runs'))
+    # def make_writer(self):
+    #     self.writer = SummaryWriter(os.path.join(self.save_dir, 'tensorboard'))
 
     def make_save_img_dir(self, save_dir):
-        save_dir_tmp = save_dir + self.save_postfix
+        save_dir_tmp = save_dir + '/test' + self.save_postfix
         num = 2
         while os.path.isdir(save_dir_tmp):
-            save_dir_tmp = save_dir + self.save_postfix + '_' + str(num)
+            save_dir_tmp = save_dir + '/test' + self.save_postfix + '_' + str(num)
             num += 1
 
         os.makedirs(save_dir_tmp)

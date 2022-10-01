@@ -5,6 +5,7 @@ import torch
 import json
 # from torchvision import transforms
 import os
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image
@@ -298,38 +299,54 @@ class NuScenesData:
         self.instokens = []
         self.anntokens = []  # multiple anntokens can have the same instoken
         self.ins_ann_tokens = {}
-        # retrieve all the target instance
-        for instance in instance_all:
-            if self.nusc.get('category', instance['category_token'])['name'] == nusc_cat:
-                instoken = instance['token']
-                # self.tgt_instance_list.append(instance)
-                anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
-                for anntoken in anntokens:
-                    # rule out those night samples
-                    sample_ann = self.nusc.get('sample_annotation', anntoken)
-                    sample_record = self.nusc.get('sample', sample_ann['sample_token'])
-                    scene = self.nusc.get('scene', sample_record['scene_token'])
-                    if 'mini' in nusc_version:
-                        if split == 'train' and scene['name'] not in data_splits_nusc.mini_train:
-                            continue
-                        if split == 'val' and scene['name'] not in data_splits_nusc.mini_val:
-                            continue
-                    if 'trainval' in nusc_version:
-                        if split == 'train' and scene['name'] not in data_splits_nusc.train:
-                            continue
-                        if split == 'val' and scene['name'] not in data_splits_nusc.val:
-                            continue
-                    if 'test' in nusc_version:
-                        if split == 'test' and scene['name'] not in data_splits_nusc.test:
-                            continue
+        # save and load to avoid repeating preparation
+        subset_file = 'jsonfiles/nusc.' + nusc_version + '.' + split + '.' + nusc_cat + '.json'
+        if os.path.exists(subset_file):
+            nusc_subset = json.load(open(subset_file))
+            self.instokens = nusc_subset['instokens']
+            self.anntokens = nusc_subset['anntokens']
+            self.ins_ann_tokens = nusc_subset['ins_ann_tokens']
+            print('Loaded pre-prepared subset of instance and annotation lists.')
+        else:
+            # retrieve all the target instance
+            print('Preparing related subset of instance and annotation lists ...')
+            for instance in tqdm(instance_all):
+                if self.nusc.get('category', instance['category_token'])['name'] == nusc_cat:
+                    instoken = instance['token']
+                    # self.tgt_instance_list.append(instance)
+                    anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
+                    for anntoken in anntokens:
+                        # rule out those night samples
+                        sample_ann = self.nusc.get('sample_annotation', anntoken)
+                        sample_record = self.nusc.get('sample', sample_ann['sample_token'])
+                        scene = self.nusc.get('scene', sample_record['scene_token'])
+                        if 'mini' in nusc_version:
+                            if split == 'train' and scene['name'] not in data_splits_nusc.mini_train:
+                                continue
+                            if split == 'val' and scene['name'] not in data_splits_nusc.mini_val:
+                                continue
+                        if 'trainval' in nusc_version:
+                            if split == 'train' and scene['name'] not in data_splits_nusc.train:
+                                continue
+                            if split == 'val' and scene['name'] not in data_splits_nusc.val:
+                                continue
+                        if 'test' in nusc_version:
+                            if split == 'test' and scene['name'] not in data_splits_nusc.test:
+                                continue
 
-                    log_file = self.nusc.get('log', scene['log_token'])['logfile']
-                    log_items = log_file.split('-')
-                    if int(log_items[4]) >= 18:
-                        continue
-                    self.instokens.append(instoken)
-                    self.anntokens.append(anntoken)
-                self.ins_ann_tokens[instoken] = anntokens
+                        log_file = self.nusc.get('log', scene['log_token'])['logfile']
+                        log_items = log_file.split('-')
+                        if int(log_items[4]) >= 18:
+                            continue
+                        self.instokens.append(instoken)
+                        self.anntokens.append(anntoken)
+                    self.ins_ann_tokens[instoken] = anntokens
+            # save into json file for quick load next time
+            nusc_subset = {}
+            nusc_subset['instokens'] = self.instokens
+            nusc_subset['anntokens'] = self.anntokens
+            nusc_subset['ins_ann_tokens'] = self.ins_ann_tokens
+            json.dump(nusc_subset, open(subset_file, 'w'), indent=4)
 
         self.lenids = len(self.anntokens)
         print(f'{self.lenids} annotations in {self.nusc_cat} category are included in dataloader.')

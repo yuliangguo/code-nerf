@@ -7,13 +7,13 @@ import argparse
 
 from src.utils import str2bool
 from src.optimizer_nuscenes import OptimizerNuScenes
-from src.data_nuscene import NuScenesData
+from src.data_nuscenes import NuScenesData
 
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--model_dir", dest="model_dir", default='srncar_08182022',
+    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-mini.use_instance.bsize3_2022_09_29',
                             help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")

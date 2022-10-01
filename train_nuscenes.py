@@ -7,7 +7,7 @@ import argparse
 from datetime import date
 
 from src.trainer_nuscenes import TrainerNuScenes
-from src.data_nuscene import NuScenesData
+from src.data_nuscenes import NuScenesData
 
 
 if __name__ == '__main__':
@@ -38,8 +38,7 @@ if __name__ == '__main__':
     nusc_seg_dir = os.path.join(args.nusc_data_dir, 'pred_' + args.seg_source)
     today = date.today()
     dt_str = today.strftime('_%Y_%m_%d')
-
-    save_dir = args.nusc_cat + '.use_' + args.seg_source + dt_str
+    save_dir = args.nusc_cat + '.' + args.nusc_version + '.use_' + args.seg_source + f'.bsize{args.batch_size}' + dt_str
 
     nusc_dataset = NuScenesData(
         nusc_cat=args.nusc_cat,
