@@ -151,7 +151,7 @@ class TrainerNuScenes:
 
                 # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                 tgt_img = tgt_img * (mask_occ > 0)
-                tgt_img = tgt_img + (mask_occ < 0)
+                # tgt_img = tgt_img + (mask_occ < 0)
 
                 tgt_img = tgt_img[random_ray_ids].to(self.device)
                 mask_occ = mask_occ[random_ray_ids].to(self.device)
@@ -304,8 +304,14 @@ class TrainerNuScenes:
         saved_data = torch.load(saved_path, map_location = torch.device('cpu'))
         self.model.load_state_dict(saved_data['model_params'])
         self.model = self.model.to(self.device)
-        self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1,-1)
-        self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
+        # mean shape should only consider those optimized codes when some of those are not touched
+        if 'optimized_idx' in saved_data.keys():
+            optimized_idx = saved_data['optimized_idx']
+            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx], dim=0).reshape(1, -1)
+            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx], dim=0).reshape(1, -1)
+        else:
+            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1,-1)
+            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
 
     def make_savedir(self, save_dir):
         self.save_dir = os.path.join(f'exps_nuscenes', save_dir)

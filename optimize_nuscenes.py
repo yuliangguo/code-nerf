@@ -13,7 +13,7 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-mini.use_instance.bsize3_2022_09_29',
+    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-trainval.use_instance.bsize4_2022_09_30',
                             help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
