@@ -151,7 +151,7 @@ class TrainerNuScenes:
 
                 # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                 tgt_img = tgt_img * (mask_occ > 0)
-                # tgt_img = tgt_img + (mask_occ < 0)
+                tgt_img = tgt_img + (mask_occ < 0)
 
                 tgt_img = tgt_img[random_ray_ids].to(self.device)
                 mask_occ = mask_occ[random_ray_ids].to(self.device)
@@ -169,12 +169,14 @@ class TrainerNuScenes:
                                           viewdir.to(self.device),
                                           shapecode, texturecode)
                 rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
-                loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (
+                            torch.sum(torch.abs(mask_occ)) + 1e-9)
                 # Occupancy loss is essential, the BG portion adjust the nerf as well
                 loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                # self.loss_total += (loss_rgb + 1e-5 * loss_occ + 1e-2 * loss_reg)
-                self.loss_total += loss_rgb + 1e-5 * loss_occ
+                # self.loss_total += (loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
+                self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
 
                 self.losses_rgb.append(loss_rgb.detach().item())
                 self.losses_occ.append(loss_occ.detach().item())
@@ -264,9 +266,7 @@ class TrainerNuScenes:
                               torch.from_numpy(ret).permute(2, 0, 1))
 
     def set_optimizers(self):
-        # lr1, lr2 = self.get_learning_rate()
-        lr1 = 1e-4
-        lr2 = 1e-4
+        lr1, lr2 = self.get_learning_rate()
         self.opts = torch.optim.AdamW([
             {'params': self.model.parameters(), 'lr': lr1},
             {'params': self.shape_codes.parameters(), 'lr': lr2},
