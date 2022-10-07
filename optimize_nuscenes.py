@@ -26,7 +26,7 @@ if __name__ == '__main__':
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
-                            help="version number required to load nuscene ground-truh")
+                            help="version number required to load nuscene ground-truth")
     # arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
     arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=100)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)

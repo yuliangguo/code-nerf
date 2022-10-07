@@ -278,6 +278,7 @@ class OptimizerNuScenes:
 
             # First Optimize
             self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+            # self.set_optimizers_w_euler_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
             est_poses = torch.zeros((1, 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
@@ -390,8 +391,8 @@ class OptimizerNuScenes:
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
-                    # self.set_optimizers(shapecode, texturecode)
                     self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+                    # self.set_optimizers_w_euler_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
 
             # Save the optimized codes
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
@@ -591,7 +592,6 @@ class OptimizerNuScenes:
                 self.device).detach().requires_grad_()
 
             # Optimize
-            # self.set_optimizers(shapecode, texturecode)
             self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec,
                                               code_stop_nopts=code_stop_nopts)
             est_poses = torch.zeros((tgt_imgs.shape[0], 3, 4), dtype=torch.float32)
@@ -712,7 +712,6 @@ class OptimizerNuScenes:
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
-                    # self.set_optimizers(shapecode, texturecode)
                     self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
 
             # Save the optimized codes
@@ -888,6 +887,18 @@ class OptimizerNuScenes:
             {'params': texturecode, 'lr': lr*2},
             {'params': euler_angles, 'lr': lr},
             {'params': trans, 'lr':  lr}
+        ])
+
+    def set_optimizers_w_euler_poses_model(self, shapecode, texturecode, euler_angles, trans):
+        # lr = self.get_learning_rate()
+        lr1 = 1e-4
+        lr2 = 1e-4
+        self.opts = torch.optim.AdamW([
+            {'params': self.model.parameters(), 'lr': lr1},
+            {'params': shapecode, 'lr': lr2},
+            {'params': texturecode, 'lr': lr2*2},
+            {'params': euler_angles, 'lr': lr2},
+            {'params': trans, 'lr':  lr2}
         ])
 
     def get_learning_rate(self):

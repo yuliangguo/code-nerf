@@ -253,7 +253,7 @@ def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
     area_ratio = float(tgt_ins_cnt) / tgt_bb_area
     return tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou
 
-
+# TODO: make an initial pre-process save all the valid cases?
 class NuScenesData:
     def __init__(self, nusc_cat='vehicle.car',
                  seg_cat='car',
