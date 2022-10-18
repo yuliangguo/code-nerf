@@ -306,9 +306,9 @@ class TrainerNuScenes:
         self.model = self.model.to(self.device)
         # mean shape should only consider those optimized codes when some of those are not touched
         if 'optimized_idx' in saved_data.keys():
-            optimized_idx = saved_data['optimized_idx']
-            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx], dim=0).reshape(1, -1)
-            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx], dim=0).reshape(1, -1)
+            optimized_idx = saved_data['optimized_idx'].numpy()
+            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1, -1)
+            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1, -1)
         else:
             self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1,-1)
             self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)

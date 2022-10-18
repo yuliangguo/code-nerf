@@ -13,15 +13,15 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
     arg_parser.add_argument("--saved_dir", dest="saved_dir", default='srncar_08182022')
-    arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[0, 120],
+    arg_parser.add_argument("--tgt_instances", dest="tgt_instances", nargs='+', default=[0],
                             help="the ids of the instances used for optimization, evaluation applies on the rest")
     arg_parser.add_argument("--splits", dest="splits", default='test')
     arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=200)
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=50)
-    arg_parser.add_argument("--max_rot_pert", dest="max_rot_pert", type=float, default=0.3,
+    arg_parser.add_argument("--max_rot_pert", dest="max_rot_pert", type=float, default=0.1,
                             help="the max rotation perturbation applying to object pose")
-    arg_parser.add_argument("--max_t_pert", dest="max_t_pert", type=float, default=0.3,
+    arg_parser.add_argument("--max_t_pert", dest="max_t_pert", type=float, default=0.1,
                             help="the max translation perturbation applying to object pose")
     arg_parser.add_argument("--save_img", dest="save_img", action='store_true')
     arg_parser.add_argument("--eval_photo", dest="eval_photo", action='store_true')

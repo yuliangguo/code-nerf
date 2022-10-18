@@ -253,6 +253,7 @@ def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
     area_ratio = float(tgt_ins_cnt) / tgt_bb_area
     return tgt_ins_id, tgt_ins_cnt, area_ratio, box_iou
 
+
 # TODO: make an initial pre-process save all the valid cases?
 class NuScenesData:
     def __init__(self, nusc_cat='vehicle.car',
@@ -336,11 +337,12 @@ class NuScenesData:
 
                         log_file = self.nusc.get('log', scene['log_token'])['logfile']
                         log_items = log_file.split('-')
-                        if int(log_items[4]) >= 18:
+                        if int(log_items[4]) >= 18:  # Consider time after 18:00 as night
                             continue
                         self.instokens.append(instoken)
                         self.anntokens.append(anntoken)
-                    self.ins_ann_tokens[instoken] = anntokens
+                        if instoken not in self.ins_ann_tokens.keys():
+                            self.ins_ann_tokens[instoken] = anntokens
             # save into json file for quick load next time
             nusc_subset = {}
             nusc_subset['instokens'] = self.instokens

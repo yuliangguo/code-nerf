@@ -559,6 +559,7 @@ class OptimizerNuScenes:
         self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
         code_stop_nopts = lr_half_interval  # stop updating codes early to focus on pose updates
         instokens = self.nusc_dataset.ins_ann_tokens.keys()
+        # instokens = np.unique(self.nusc_dataset.instokens)
 
         # Per object
         for obj_idx, instoken in enumerate(instokens):
@@ -916,12 +917,12 @@ class OptimizerNuScenes:
         self.model = self.model.to(self.device)
         # mean shape should only consider those optimized codes when some of those are not touched
         if 'optimized_idx' in saved_data.keys():
-            optimized_idx = saved_data['optimized_idx']
-            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx], dim=0).reshape(1, -1)
-            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx], dim=0).reshape(1, -1)
+            optimized_idx = saved_data['optimized_idx'].numpy()
+            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1, -1)
+            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1, -1)
         else:
-            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1,-1)
-            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
+            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1, -1)
+            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1, -1)
 
     # def make_writer(self):
     #     self.writer = SummaryWriter(os.path.join(self.save_dir, 'tensorboard'))
