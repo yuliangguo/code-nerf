@@ -343,6 +343,11 @@ class OptimizerNuScenes:
                 gt_imgs.append(tgt_imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                 gt_masks_occ.append(masks_occ[0, roi[1]:roi[3], roi[0]:roi[2]])
                 est_poses[0] = pose2opt.detach().cpu()
+                errs_R, errs_T = self.calc_obj_pose_err(est_poses, tgt_poses)
+                if self.nopts == 0:
+                    print('   Initial R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
+                if self.nopts == self.num_opts - 1:
+                    print('   Final R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 self.opts.step()
 
                 # Just use the cropped region instead to save computation on the visualization
@@ -350,10 +355,10 @@ class OptimizerNuScenes:
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
                     # generate the full images
                     generated_imgs = []
-                    errs_R, errs_T = self.calc_obj_pose_err(est_poses, tgt_poses)
                     with torch.no_grad():
                         # for num, cam_id in enumerate(cam_ids):
                         tgt_pose, roi, K = tgt_poses[0], rois[0], cam_intrinsics[0]
+                        pose2opt = est_poses[0]
 
                         # near and far sample range need to be adaptively calculated
                         near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
@@ -657,7 +662,11 @@ class OptimizerNuScenes:
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
                     self.optimized_ann_flag[anntokens[num]] = 1
                     est_poses[num] = pose2opt.detach().cpu()
-
+                errs_R, errs_T = self.calc_obj_pose_err(est_poses, tgt_poses)
+                if self.nopts == 0:
+                    print('    Initial R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
+                if self.nopts == self.num_opts - 1:
+                    print('    Final R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 self.opts.step()
                 # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
                 #                        obj_idx)
@@ -667,11 +676,10 @@ class OptimizerNuScenes:
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
                     # generate the full images
                     generated_imgs = []
-                    errs_R, errs_T = self.calc_obj_pose_err(est_poses, tgt_poses)
+
                     with torch.no_grad():
                         for num in range(0, tgt_imgs.shape[0]):
                             tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
-
                             pose2opt = est_poses[num]
 
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
@@ -747,7 +755,7 @@ class OptimizerNuScenes:
             'optimized_ann_flag': self.optimized_ann_flag,
         }
         torch.save(saved_dict, os.path.join(self.save_dir, 'codes+poses.pth'))
-        print('We finished the optimization of ' + str(num_obj))
+        # print('We finished the optimization of ' + str(num_obj))
 
     def align_imgs_width(self, imgs, W, max_view=4):
         """
@@ -830,7 +838,7 @@ class OptimizerNuScenes:
         for i, ann_token in enumerate(ann_tokens):
             self.R_eval[ann_token] = err_R[i]
             self.T_eval[ann_token] = err_T[i]
-            print(f'    R_error: {self.R_eval[ann_token]}, T_error: {self.T_eval[ann_token]}')
+            # print(f'    R_error: {self.R_eval[ann_token]}, T_error: {self.T_eval[ann_token]}')
 
     def calc_cam_pose_err(self, est_poses, tgt_poses):
         est_R = est_poses[:, :3, :3]
