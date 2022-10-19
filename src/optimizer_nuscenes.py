@@ -286,106 +286,100 @@ class OptimizerNuScenes:
                 gt_imgs = []
                 gt_masks_occ = []
                 loss_per_img = []
-                for num, cam_id in enumerate(cam_ids):
-                    tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[num], tgt_poses[num], masks_occ[num], rois[num], cam_intrinsics[num]
+                # for num, cam_id in enumerate(cam_ids):
+                tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[0], tgt_poses[0], masks_occ[0], rois[0], cam_intrinsics[0]
 
-                    t2opt = trans_vec[num].unsqueeze(-1)
-                    rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[num], 'XYZ')
-                    pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
+                t2opt = trans_vec[0].unsqueeze(-1)
+                rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[0], 'XYZ')
+                pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
 
-                    # near and far sample range need to be adaptively calculated
-                    near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
-                    far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
+                # near and far sample range need to be adaptively calculated
+                near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
+                far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
 
-                    # TODO: should the roi change as pose2opt changes?
-                    rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
+                # TODO: should the roi change as pose2opt changes?
+                rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
 
-                    # For different sized roi, extract a random subset of pixels with fixed batch size
-                    n_rays = np.minimum(rays_o.shape[0], self.n_rays)
-                    random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
-                    rays_o = rays_o[random_ray_ids]
-                    viewdir = viewdir[random_ray_ids]
+                # For different sized roi, extract a random subset of pixels with fixed batch size
+                n_rays = np.minimum(rays_o.shape[0], self.n_rays)
+                random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
+                rays_o = rays_o[random_ray_ids]
+                viewdir = viewdir[random_ray_ids]
 
-                    # The random selection should be within the roi pixels
-                    tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 3)
-                    mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 1)
+                # The random selection should be within the roi pixels
+                tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 3)
+                mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].reshape(-1, 1)
 
-                    # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
-                    tgt_img = tgt_img * (mask_occ > 0)
-                    tgt_img = tgt_img + (mask_occ < 0)
+                # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
+                tgt_img = tgt_img * (mask_occ > 0)
+                tgt_img = tgt_img + (mask_occ < 0)
 
-                    tgt_img = tgt_img[random_ray_ids].to(self.device)
-                    mask_occ = mask_occ[random_ray_ids].to(self.device)
-                    mask_rgb = torch.clone(mask_occ)
-                    mask_rgb[mask_rgb < 0] = 0
+                tgt_img = tgt_img[random_ray_ids].to(self.device)
+                mask_occ = mask_occ[random_ray_ids].to(self.device)
+                mask_rgb = torch.clone(mask_occ)
+                mask_rgb[mask_rgb < 0] = 0
 
-                    xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                            self.hpams['N_samples'])
-                    # TODO: how the object space is normalized and transferred shape net
-                    xyz /= obj_diag
-                    xyz = xyz[:, :, [1, 0, 2]]
-                    viewdir = viewdir[:, :, [1, 0, 2]]
+                xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
+                                                        self.hpams['N_samples'])
+                # TODO: how the object space is normalized and transferred shape net
+                xyz /= obj_diag
+                xyz = xyz[:, :, [1, 0, 2]]
+                viewdir = viewdir[:, :, [1, 0, 2]]
 
-                    sigmas, rgbs = self.model(xyz.to(self.device),
-                                              viewdir.to(self.device),
-                                              shapecode, texturecode)
-                    rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
-                    # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                    loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss is essential, the BG portion adjust the nerf as well
-                    loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
-                    loss.backward()
-                    loss_per_img.append(loss_rgb.detach().item())
-                    # Different roi sizes are dealt in save_image later
-                    gt_imgs.append(tgt_imgs[num, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
-                    gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
-
+                sigmas, rgbs = self.model(xyz.to(self.device),
+                                          viewdir.to(self.device),
+                                          shapecode, texturecode)
+                rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
+                # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                # Occupancy loss is essential, the BG portion adjust the nerf as well
+                loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                # loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                loss.backward()
+                loss_per_img.append(loss_rgb.detach().item())
+                # Different roi sizes are dealt in save_image later
+                gt_imgs.append(tgt_imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
+                gt_masks_occ.append(masks_occ[0, roi[1]:roi[3], roi[0]:roi[2]])
+                est_poses[0] = pose2opt.detach().cpu()
                 self.opts.step()
-                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
-                #                        batch_idx)
-                # self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
                 # ATTENTION: the first visual is already after one iter of optimization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
                     # generate the full images
                     generated_imgs = []
+                    errs_R, errs_T = self.calc_obj_pose_err(est_poses, tgt_poses)
                     with torch.no_grad():
-                        for num, cam_id in enumerate(cam_ids):
-                            tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
+                        # for num, cam_id in enumerate(cam_ids):
+                        tgt_pose, roi, K = tgt_poses[0], rois[0], cam_intrinsics[0]
 
-                            t2opt = trans_vec[num].unsqueeze(-1)
-                            rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[num], 'XYZ')
-                            pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
+                        # near and far sample range need to be adaptively calculated
+                        near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
+                        far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
 
-                            # near and far sample range need to be adaptively calculated
-                            near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
-                            far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
+                        rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
+                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
+                                                                self.hpams['N_samples'])
+                        # TODO: how the object space is normalized and transferred shape net
+                        xyz /= obj_diag
+                        xyz = xyz[:, :, [1, 0, 2]]
+                        viewdir = viewdir[:, :, [1, 0, 2]]
 
-                            rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
-                            xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                                    self.hpams['N_samples'])
-                            # TODO: how the object space is normalized and transferred shape net
-                            xyz /= obj_diag
-                            xyz = xyz[:, :, [1, 0, 2]]
-                            viewdir = viewdir[:, :, [1, 0, 2]]
-
-                            generated_img = []
-                            sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
-                            for i in range(0, xyz.shape[0], sample_step):
-                                sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                                          viewdir[i:i + sample_step].to(self.device),
-                                                          shapecode, texturecode)
-                                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                                generated_img.append(rgb_rays)
-                            generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
-
-                            # save the last pose for later evaluation
-                            if self.nopts == (self.num_opts-1):
-                                est_poses[num] = pose2opt.detach().cpu()
+                        generated_img = []
+                        sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
+                        for i in range(0, xyz.shape[0], sample_step):
+                            sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
+                                                      viewdir[i:i + sample_step].to(self.device),
+                                                      shapecode, texturecode)
+                            rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+                            generated_img.append(rgb_rays)
+                        generated_img = torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3)
+                        err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[0], errs_T[0])
+                        generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
+                                                    cv2.FONT_HERSHEY_SIMPLEX, .3, (1, 0, 0))
+                        generated_imgs.append(torch.from_numpy(generated_img))
 
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
 
@@ -662,6 +656,7 @@ class OptimizerNuScenes:
                     gt_imgs.append(tgt_imgs[num, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
                     self.optimized_ann_flag[anntokens[num]] = 1
+                    est_poses[num] = pose2opt.detach().cpu()
 
                 self.opts.step()
                 # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
@@ -672,13 +667,12 @@ class OptimizerNuScenes:
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
                     # generate the full images
                     generated_imgs = []
+                    errs_R, errs_T = self.calc_obj_pose_err(est_poses, tgt_poses)
                     with torch.no_grad():
                         for num in range(0, tgt_imgs.shape[0]):
                             tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
 
-                            t2opt = trans_vec[num].unsqueeze(-1)
-                            rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[num], 'XYZ')
-                            pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
+                            pose2opt = est_poses[num]
 
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
                             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
@@ -690,7 +684,7 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # TODO: how the object space is normalized and transferred shape net
+                            # TODO: how the object space is normalized and transferred to shape net
                             xyz /= obj_diag
                             xyz = xyz[:, :, [1, 0, 2]]
                             viewdir = viewdir[:, :, [1, 0, 2]]
@@ -703,7 +697,11 @@ class OptimizerNuScenes:
                                                           shapecode, texturecode)
                                 rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
                                 generated_img.append(rgb_rays)
-                            generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
+                            generated_img = torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3)
+                            err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[num], errs_T[num])
+                            generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
+                                                        cv2.FONT_HERSHEY_SIMPLEX, .3, (1, 0, 0))
+                            generated_imgs.append(torch.from_numpy(generated_img))
 
                             # save the last pose for later evaluation
                             if self.nopts == (self.num_opts - 1):
@@ -751,6 +749,30 @@ class OptimizerNuScenes:
         torch.save(saved_dict, os.path.join(self.save_dir, 'codes+poses.pth'))
         print('We finished the optimization of ' + str(num_obj))
 
+    def align_imgs_width(self, imgs, W, max_view=4):
+        """
+            imgs: a list of tensors
+        """
+        out_imgs = []
+        if len(imgs) > max_view:
+            step = len(imgs) // max_view
+        else:
+            step = 1
+
+        for id in range(0, len(imgs), step):
+            img = imgs[id]
+            H_i, W_i = img.shape[:2]
+            H_out = int(float(H_i) * W / W_i)
+            # out_imgs.append(Image.fromarray(img.detach().cpu().numpy()).resize((W, H_out)))
+            img = img.reshape((1, H_i, W_i, -1))
+            img = img.permute((0, 3, 1, 2))
+            img = torchvision.transforms.Resize((H_out, W))(img)
+            img = img.permute((0, 2, 3, 1))
+            out_imgs.append(img.squeeze())
+            if len(out_imgs) == max_view:
+                break
+        return out_imgs
+
     def save_img(self, generated_imgs, gt_imgs, masks_occ, obj_id, instance_num):
         # H, W = gt_imgs[0].shape[:2]
         W_tgt = np.min([gt_img.shape[1] for gt_img in gt_imgs])
@@ -777,30 +799,6 @@ class OptimizerNuScenes:
         # imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_{:03d}'.format(instance_num) + '.png'), ret)
         imageio.imwrite(os.path.join(save_img_dir, 'opt' + '{:03d}'.format(instance_num) + '.png'), ret)
 
-    def align_imgs_width(self, imgs, W, max_view=4):
-        """
-            imgs: a list of tensors
-        """
-        out_imgs = []
-        if len(imgs) > max_view:
-            step = len(imgs) // max_view
-        else:
-            step = 1
-
-        for id in range(0, len(imgs), step):
-            img = imgs[id]
-            H_i, W_i = img.shape[:2]
-            H_out = int(float(H_i) * W / W_i)
-            # out_imgs.append(Image.fromarray(img.detach().cpu().numpy()).resize((W, H_out)))
-            img = img.reshape((1, H_i, W_i, -1))
-            img = img.permute((0, 3, 1, 2))
-            img = torchvision.transforms.Resize((H_out, W))(img)
-            img = img.permute((0, 2, 3, 1))
-            out_imgs.append(img.squeeze())
-            if len(out_imgs) == max_view:
-                break
-        return out_imgs
-
     def log_compute_ssim(self, generated_img, gt_img, niters, obj_idx):
         generated_img_np = generated_img.detach().cpu().numpy()
         gt_img_np = gt_img.detach().cpu().numpy()
@@ -820,10 +818,11 @@ class OptimizerNuScenes:
             self.psnr_eval[obj_idx].append(psnr)
 
     def log_eval_pose(self, est_poses, tgt_poses, ann_tokens):
-        est_R = est_poses[:, :3, :3]
-        est_T = est_poses[:, :3, 3]
-        tgt_R = tgt_poses[:, :3, :3]
-        tgt_T = tgt_poses[:, :3, 3]
+        # convert back to object pose to evaluaate
+        est_R = est_poses[:, :3, :3].transpose(-1, -2)
+        est_T = -torch.matmul(est_R, est_poses[:, :3, 3:]).squeeze(-1)
+        tgt_R = tgt_poses[:, :3, :3].transpose(-1, -2)
+        tgt_T = -torch.matmul(tgt_R, tgt_poses[:, :3, 3:]).squeeze(-1)
 
         err_R = rot_dist(est_R, tgt_R)
         err_T = torch.sqrt(torch.sum((est_T - tgt_T)**2, dim=-1))
@@ -833,12 +832,25 @@ class OptimizerNuScenes:
             self.T_eval[ann_token] = err_T[i]
             print(f'    R_error: {self.R_eval[ann_token]}, T_error: {self.T_eval[ann_token]}')
 
-        # if self.R_eval.get(ann_token) is None:
-        #     self.R_eval[ann_token] = [err_R]
-        #     self.T_eval[ann_token] = [err_T]
-        # else:
-        #     self.R_eval[ann_token].append(err_R)
-        #     self.T_eval[ann_token].append(err_T)
+    def calc_cam_pose_err(self, est_poses, tgt_poses):
+        est_R = est_poses[:, :3, :3]
+        est_T = est_poses[:, :3, 3]
+        tgt_R = tgt_poses[:, :3, :3]
+        tgt_T = tgt_poses[:, :3, 3]
+
+        err_R = rot_dist(est_R, tgt_R)
+        err_T = torch.sqrt(torch.sum((est_T - tgt_T) ** 2, dim=-1))
+        return err_R, err_T
+
+    def calc_obj_pose_err(self, est_poses, tgt_poses):
+        est_R = est_poses[:, :3, :3].transpose(-1, -2)
+        est_T = -torch.matmul(est_R, est_poses[:, :3, 3:]).squeeze(-1)
+        tgt_R = tgt_poses[:, :3, :3].transpose(-1, -2)
+        tgt_T = -torch.matmul(tgt_R, tgt_poses[:, :3, 3:]).squeeze(-1)
+
+        err_R = rot_dist(est_R, tgt_R)
+        err_T = torch.sqrt(torch.sum((est_T - tgt_T) ** 2, dim=-1))
+        return err_R, err_T
 
     # def log_opt_psnr_time(self, loss_per_img, time_spent, niters, obj_idx):
     #     psnr = -10*np.log(loss_per_img) / np.log(10)
@@ -865,15 +877,6 @@ class OptimizerNuScenes:
             {'params': shapecode, 'lr': lr2},
             {'params': texturecode, 'lr': lr2}
         ])
-
-    # def set_optimizers_w_pose(self, shapecode, texturecode, poses):
-    #     lr = self.get_learning_rate()
-    #     #print(lr)
-    #     self.opts = torch.optim.AdamW([
-    #         {'params': shapecode, 'lr': lr},
-    #         {'params': texturecode, 'lr': lr},
-    #         {'params': poses, 'lr': lr},
-    #     ])
 
     def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans, code_stop_nopts=None):
         lr = self.get_learning_rate()
