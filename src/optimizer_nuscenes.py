@@ -274,10 +274,12 @@ class OptimizerNuScenes:
 
             rot_mat_vec = pred_poses[:, :3, :3]
             trans_vec = pred_poses[:, :3, 3].to(self.device).detach().requires_grad_()
-            euler_angles_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(self.device).detach().requires_grad_()
+            axis_angle_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
+            # euler_angles_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(self.device).detach().requires_grad_()
 
             # First Optimize
-            self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+            self.set_optimizers_w_poses(shapecode, texturecode, axis_angle_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+            # self.set_optimizers_w_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
             # self.set_optimizers_w_euler_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
             est_poses = torch.zeros((1, 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
@@ -290,7 +292,8 @@ class OptimizerNuScenes:
                 tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[0], tgt_poses[0], masks_occ[0], rois[0], cam_intrinsics[0]
 
                 t2opt = trans_vec[0].unsqueeze(-1)
-                rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[0], 'XYZ')
+                rot_mat2opt = rot_trans.axis_angle_to_matrix(axis_angle_vec[0])
+                # rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[0], 'XYZ')
                 pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
 
                 # near and far sample range need to be adaptively calculated
@@ -390,8 +393,9 @@ class OptimizerNuScenes:
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
-                    self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
-                    # self.set_optimizers_w_euler_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
+                    self.set_optimizers_w_poses(shapecode, texturecode, axis_angle_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+                    # self.set_optimizers_w_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+                    # self.set_optimizers_w_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
 
             # Save the optimized codes
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
@@ -588,12 +592,15 @@ class OptimizerNuScenes:
 
             rot_mat_vec = pred_poses[:, :3, :3]
             trans_vec = pred_poses[:, :3, 3].to(self.device).detach().requires_grad_()
-            euler_angles_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(
-                self.device).detach().requires_grad_()
+            axis_angle_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
+            # euler_angles_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(
+            #     self.device).detach().requires_grad_()
 
             # Optimize
-            self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec,
-                                              code_stop_nopts=code_stop_nopts)
+            self.set_optimizers_w_poses(shapecode, texturecode, axis_angle_vec, trans_vec,
+                                        code_stop_nopts=code_stop_nopts)
+            # self.set_optimizers_w_poses(shapecode, texturecode, euler_angles_vec, trans_vec,
+            #                             code_stop_nopts=code_stop_nopts)
             est_poses = torch.zeros((tgt_imgs.shape[0], 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
@@ -605,7 +612,8 @@ class OptimizerNuScenes:
                     tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[num], tgt_poses[num], masks_occ[num], rois[num], cam_intrinsics[num]
 
                     t2opt = trans_vec[num].unsqueeze(-1)
-                    rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[num], 'XYZ')
+                    rot_mat2opt = rot_trans.axis_angle_to_matrix(axis_angle_vec[num])
+                    # rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angles_vec[num], 'XYZ')
                     pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
 
                     obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
@@ -668,9 +676,6 @@ class OptimizerNuScenes:
                 if self.nopts == self.num_opts - 1:
                     print('    Final R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 self.opts.step()
-                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
-                #                        obj_idx)
-                # self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -719,7 +724,8 @@ class OptimizerNuScenes:
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
-                    self.set_optimizers_w_euler_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+                    self.set_optimizers_w_poses(shapecode, texturecode, axis_angle_vec, trans_vec, code_stop_nopts=code_stop_nopts)
+                    # self.set_optimizers_w_poses(shapecode, texturecode, euler_angles_vec, trans_vec, code_stop_nopts=code_stop_nopts)
 
             # Save the optimized codes
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
@@ -886,7 +892,7 @@ class OptimizerNuScenes:
             {'params': texturecode, 'lr': lr2}
         ])
 
-    def set_optimizers_w_euler_poses(self, shapecode, texturecode, euler_angles, trans, code_stop_nopts=None):
+    def set_optimizers_w_poses(self, shapecode, texturecode, rots, trans, code_stop_nopts=None):
         lr = self.get_learning_rate()
         # if code_stop_nopts is not None and self.nopts >= code_stop_nopts:
         #     self.opts = torch.optim.AdamW([
@@ -897,11 +903,11 @@ class OptimizerNuScenes:
         self.opts = torch.optim.AdamW([
             {'params': shapecode, 'lr': lr},
             {'params': texturecode, 'lr': lr*2},
-            {'params': euler_angles, 'lr': lr},
+            {'params': rots, 'lr': lr},
             {'params': trans, 'lr':  lr}
         ])
 
-    def set_optimizers_w_euler_poses_model(self, shapecode, texturecode, euler_angles, trans):
+    def set_optimizers_w_poses_model(self, shapecode, texturecode, rots, trans):
         # lr = self.get_learning_rate()
         lr1 = 1e-4
         lr2 = 1e-4
@@ -909,7 +915,7 @@ class OptimizerNuScenes:
             {'params': self.model.parameters(), 'lr': lr1},
             {'params': shapecode, 'lr': lr2},
             {'params': texturecode, 'lr': lr2*2},
-            {'params': euler_angles, 'lr': lr2},
+            {'params': rots, 'lr': lr2},
             {'params': trans, 'lr':  lr2}
         ])
 
