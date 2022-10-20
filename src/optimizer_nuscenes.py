@@ -153,10 +153,12 @@ class OptimizerNuScenes:
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
-                    # TODO: how the object space is normalized and transferred shape net
+                    # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                     xyz /= obj_diag
                     xyz = xyz[:, :, [1, 0, 2]]
+                    xyz[:, :, 0] *= (-1)
                     viewdir = viewdir[:, :, [1, 0, 2]]
+                    viewdir[:, :, 0] *= -1
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
@@ -166,9 +168,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
                     # Different roi sizes are dealt in save_image later
@@ -176,9 +178,6 @@ class OptimizerNuScenes:
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
 
                 self.opts.step()
-                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * batch_idx,
-                #                        batch_idx)
-                # self.log_regloss(loss_reg.detach().item(), self.nopts, batch_idx)
 
                 # Just use the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -195,10 +194,12 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # TODO: how the object space is normalized and transferred shape net
+                            # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                             xyz /= obj_diag
                             xyz = xyz[:, :, [1, 0, 2]]
+                            xyz[:, :, 0] *= (-1)
                             viewdir = viewdir[:, :, [1, 0, 2]]
+                            viewdir[:, :, 0] *= -1
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -324,10 +325,12 @@ class OptimizerNuScenes:
 
                 xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                         self.hpams['N_samples'])
-                # TODO: how the object space is normalized and transferred shape net
+                # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                 xyz /= obj_diag
                 xyz = xyz[:, :, [1, 0, 2]]
+                xyz[:, :, 0] *= (-1)
                 viewdir = viewdir[:, :, [1, 0, 2]]
+                viewdir[:, :, 0] *= -1
 
                 sigmas, rgbs = self.model(xyz.to(self.device),
                                           viewdir.to(self.device),
@@ -371,10 +374,12 @@ class OptimizerNuScenes:
                         rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                 self.hpams['N_samples'])
-                        # TODO: how the object space is normalized and transferred shape net
+                        # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                         xyz /= obj_diag
                         xyz = xyz[:, :, [1, 0, 2]]
+                        xyz[:, :, 0] *= (-1)
                         viewdir = viewdir[:, :, [1, 0, 2]]
+                        viewdir[:, :, 0] *= -1
 
                         generated_img = []
                         sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -422,9 +427,6 @@ class OptimizerNuScenes:
 
             if tgt_imgs is None:
                 continue
-
-            # if tgt_imgs is None or tgt_imgs.shape[0] < 2:
-            #     continue
 
             print(f'    num views: {tgt_imgs.shape[0]}')
 
@@ -482,10 +484,12 @@ class OptimizerNuScenes:
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
-                    # TODO: how the object space is normalized and transferred shape net
+                    # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                     xyz /= obj_diag
                     xyz = xyz[:, :, [1, 0, 2]]
+                    xyz[:, :, 0] *= (-1)
                     viewdir = viewdir[:, :, [1, 0, 2]]
+                    viewdir[:, :, 0] *= -1
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
@@ -495,9 +499,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -529,10 +533,12 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # TODO: how the object space is normalized and transferred shape net
+                            # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                             xyz /= obj_diag
                             xyz = xyz[:, :, [1, 0, 2]]
+                            xyz[:, :, 0] *= (-1)
                             viewdir = viewdir[:, :, [1, 0, 2]]
+                            viewdir[:, :, 0] *= -1
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -647,10 +653,12 @@ class OptimizerNuScenes:
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
-                    # TODO: how the object space is normalized and transferred shape net
+                    # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                     xyz /= obj_diag
                     xyz = xyz[:, :, [1, 0, 2]]
+                    xyz[:, :, 0] *= (-1)
                     viewdir = viewdir[:, :, [1, 0, 2]]
+                    viewdir[:, :, 0] *= -1
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
@@ -660,9 +668,9 @@ class OptimizerNuScenes:
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
                     # Occupancy loss is essential, the BG portion adjust the nerf as well
                     loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss = loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                    loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -698,10 +706,12 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # TODO: how the object space is normalized and transferred to shape net
+                            # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                             xyz /= obj_diag
                             xyz = xyz[:, :, [1, 0, 2]]
+                            xyz[:, :, 0] *= (-1)
                             viewdir = viewdir[:, :, [1, 0, 2]]
+                            viewdir[:, :, 0] *= -1
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -866,14 +876,6 @@ class OptimizerNuScenes:
         err_R = rot_dist(est_R, tgt_R)
         err_T = torch.sqrt(torch.sum((est_T - tgt_T) ** 2, dim=-1))
         return err_R, err_T
-
-    # def log_opt_psnr_time(self, loss_per_img, time_spent, niters, obj_idx):
-    #     psnr = -10*np.log(loss_per_img) / np.log(10)
-    #     self.writer.add_scalar('psnr_opt/', psnr, niters, obj_idx)
-    #     self.writer.add_scalar('time_opt/', time_spent, niters, obj_idx)
-    #
-    # def log_regloss(self, loss_reg, niters, obj_idx):
-    #     self.writer.add_scalar('reg/', loss_reg, niters, obj_idx)
 
     def set_optimizers(self, shapecode, texturecode):
         lr = self.get_learning_rate()

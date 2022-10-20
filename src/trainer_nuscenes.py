@@ -160,10 +160,12 @@ class TrainerNuScenes:
 
                 xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                         self.hpams['N_samples'])
-                # TODO: how the object space is normalized and transferred shape net
+                # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                 xyz /= obj_diag
                 xyz = xyz[:, :, [1, 0, 2]]
+                xyz[:, :, 0] *= (-1)
                 viewdir = viewdir[:, :, [1, 0, 2]]
+                viewdir[:, :, 0] *= -1
 
                 sigmas, rgbs = self.model(xyz.to(self.device),
                                           viewdir.to(self.device),
@@ -194,10 +196,12 @@ class TrainerNuScenes:
                         rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                 self.hpams['N_samples'])
-                        # TODO: how the object space is normalized and transferred shape net
+                        # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                         xyz /= obj_diag
                         xyz = xyz[:, :, [1, 0, 2]]
+                        xyz[:, :, 0] *= (-1)
                         viewdir = viewdir[:, :, [1, 0, 2]]
+                        viewdir[:, :, 0] *= -1
 
                         generated_img = []
                         sample_step = np.maximum(roi[2] - roi[0], roi[3] - roi[1])
@@ -239,7 +243,6 @@ class TrainerNuScenes:
                     self.niter += 1
 
     def log_losses(self, loss_rgb, loss_occ, loss_reg, loss_total, time_spent):
-
         psnr = -10 * np.log(loss_rgb) / np.log(10)
         self.writer.add_scalar('psnr/train', psnr, self.niter)
         self.writer.add_scalar('loss_rgb/train', loss_rgb, self.niter)
@@ -247,14 +250,6 @@ class TrainerNuScenes:
         self.writer.add_scalar('loss_reg/train', loss_reg, self.niter)
         self.writer.add_scalar('loss_total/train', loss_total, self.niter)
         self.writer.add_scalar('time/train', time_spent, self.niter)
-
-    # def log_psnr_time(self, loss_per_img, time_spent, obj_idx):
-    #     psnr = -10 * np.log(loss_per_img) / np.log(10)
-    #     self.writer.add_scalar('psnr/train', psnr, self.niter, obj_idx)
-    #     self.writer.add_scalar('time/train', time_spent, self.niter, obj_idx)
-    #
-    # def log_regloss(self, loss_reg, obj_idx):
-    #     self.writer.add_scalar('reg/train', loss_reg, self.niter, obj_idx)
 
     def log_img(self, generated_img, gtimg, mask_occ, ann_token):
         H, W = generated_img.shape[:-1]
