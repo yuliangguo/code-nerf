@@ -8,7 +8,7 @@
     "latent_dim": 256
   },
   "N_samples": 64,
-  "loss_reg_coef": 1e-4,
+  "loss_reg_coef": 1e-3,
   "loss_occ_coef": 1e-5,
   "lr_schedule": [
     {"type":  "step", "lr":  1e-4, "interval":  250000},
