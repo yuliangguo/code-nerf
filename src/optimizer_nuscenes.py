@@ -71,7 +71,7 @@ class OptimizerNuScenes:
         self.R_eval = {}
         self.T_eval = {}
 
-    def optimize_objs(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
+    def optimize_objs(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True):
         """
             Optimize on each annotation frame independently
         """
@@ -103,6 +103,7 @@ class OptimizerNuScenes:
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+
             H, W = tgt_imgs.shape[1:3]
             rois[:, 0:2] -= roi_margin
             rois[:, 2:4] += roi_margin
@@ -153,12 +154,18 @@ class OptimizerNuScenes:
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
-                    # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                     xyz /= obj_diag
-                    xyz = xyz[:, :, [1, 0, 2]]
-                    xyz[:, :, 0] *= (-1)
-                    viewdir = viewdir[:, :, [1, 0, 2]]
-                    viewdir[:, :, 0] *= -1
+                    # Nuscene to ShapeNet: rotate 90 degree around Z
+                    if shapenet_obj_cood:
+                        xyz = xyz[:, :, [1, 0, 2]]
+                        xyz[:, :, 0] *= (-1)
+                        viewdir = viewdir[:, :, [1, 0, 2]]
+                        viewdir[:, :, 0] *= (-1)
+
+                    # Apply symmetric augmentation
+                    if sym_aug and random.uniform(0, 1) > 0.5:
+                        xyz[:, :, 0] *= (-1)
+                        viewdir[:, :, 0] *= (-1)
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
@@ -194,12 +201,13 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                             xyz /= obj_diag
-                            xyz = xyz[:, :, [1, 0, 2]]
-                            xyz[:, :, 0] *= (-1)
-                            viewdir = viewdir[:, :, [1, 0, 2]]
-                            viewdir[:, :, 0] *= -1
+                            # Nuscene to ShapeNet: rotate 90 degree around Z
+                            if shapenet_obj_cood:
+                                xyz = xyz[:, :, [1, 0, 2]]
+                                xyz[:, :, 0] *= (-1)
+                                viewdir = viewdir[:, :, [1, 0, 2]]
+                                viewdir[:, :, 0] *= (-1)
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -224,7 +232,7 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
+    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=True):
         """
             Optimize on each annotation frame independently
         """
@@ -262,6 +270,7 @@ class OptimizerNuScenes:
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+
             H, W = tgt_imgs.shape[1:3]
             rois[:, 0:2] -= roi_margin
             rois[:, 2:4] += roi_margin
@@ -325,12 +334,19 @@ class OptimizerNuScenes:
 
                 xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                         self.hpams['N_samples'])
-                # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
+
                 xyz /= obj_diag
-                xyz = xyz[:, :, [1, 0, 2]]
-                xyz[:, :, 0] *= (-1)
-                viewdir = viewdir[:, :, [1, 0, 2]]
-                viewdir[:, :, 0] *= -1
+                # Nuscene to ShapeNet: rotate 90 degree around Z
+                if shapenet_obj_cood:
+                    xyz = xyz[:, :, [1, 0, 2]]
+                    xyz[:, :, 0] *= (-1)
+                    viewdir = viewdir[:, :, [1, 0, 2]]
+                    viewdir[:, :, 0] *= (-1)
+
+                # Apply symmetric augmentation
+                if sym_aug and random.uniform(0, 1) > 0.5:
+                    xyz[:, :, 0] *= (-1)
+                    viewdir[:, :, 0] *= (-1)
 
                 sigmas, rgbs = self.model(xyz.to(self.device),
                                           viewdir.to(self.device),
@@ -344,6 +360,10 @@ class OptimizerNuScenes:
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                 loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
                 # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                if obj_sz_reg:
+                    sz_reg_samples = self.generate_obj_sz_reg_samples(obj_sz, obj_diag, shapenet_obj_cood, tau=0.05)
+                    loss_obj_sz = self.loss_obj_sz(sz_reg_samples, shapecode, texturecode)
+                    loss = loss + self.hpams['loss_obj_sz_coef'] * loss_obj_sz
                 loss.backward()
                 loss_per_img.append(loss_rgb.detach().item())
                 # Different roi sizes are dealt in save_image later
@@ -374,12 +394,13 @@ class OptimizerNuScenes:
                         rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                 self.hpams['N_samples'])
-                        # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                         xyz /= obj_diag
-                        xyz = xyz[:, :, [1, 0, 2]]
-                        xyz[:, :, 0] *= (-1)
-                        viewdir = viewdir[:, :, [1, 0, 2]]
-                        viewdir[:, :, 0] *= -1
+                        # Nuscene to ShapeNet: rotate 90 degree around Z
+                        if shapenet_obj_cood:
+                            xyz = xyz[:, :, [1, 0, 2]]
+                            xyz[:, :, 0] *= (-1)
+                            viewdir = viewdir[:, :, [1, 0, 2]]
+                            viewdir[:, :, 0] *= (-1)
 
                         generated_img = []
                         sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -411,7 +432,7 @@ class OptimizerNuScenes:
             self.log_eval_pose(est_poses, tgt_poses, batch_data['anntoken'])
             self.save_opts_w_pose(batch_idx)
 
-    def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
+    def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
@@ -484,12 +505,18 @@ class OptimizerNuScenes:
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
-                    # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                     xyz /= obj_diag
-                    xyz = xyz[:, :, [1, 0, 2]]
-                    xyz[:, :, 0] *= (-1)
-                    viewdir = viewdir[:, :, [1, 0, 2]]
-                    viewdir[:, :, 0] *= -1
+                    # Nuscene to ShapeNet: rotate 90 degree around Z
+                    if shapenet_obj_cood:
+                        xyz = xyz[:, :, [1, 0, 2]]
+                        xyz[:, :, 0] *= (-1)
+                        viewdir = viewdir[:, :, [1, 0, 2]]
+                        viewdir[:, :, 0] *= (-1)
+
+                    # Apply symmetric augmentation
+                    if sym_aug and random.uniform(0, 1) > 0.5:
+                        xyz[:, :, 0] *= (-1)
+                        viewdir[:, :, 0] *= (-1)
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
@@ -511,9 +538,6 @@ class OptimizerNuScenes:
                     self.optimized_ann_flag[anntokens[num]] = 1
 
                 self.opts.step()
-                # self.log_opt_psnr_time(np.mean(loss_per_img), time.time() - t1, self.nopts + self.num_opts * obj_idx,
-                #                        obj_idx)
-                # self.log_regloss(loss_reg.detach().item(), self.nopts, obj_idx)
 
                 # Just render the cropped region instead to save computation on the visualization
                 if save_img or self.nopts == 0 or self.nopts == (self.num_opts-1):
@@ -533,12 +557,13 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                             xyz /= obj_diag
-                            xyz = xyz[:, :, [1, 0, 2]]
-                            xyz[:, :, 0] *= (-1)
-                            viewdir = viewdir[:, :, [1, 0, 2]]
-                            viewdir[:, :, 0] *= -1
+                            # Nuscene to ShapeNet: rotate 90 degree around Z
+                            if shapenet_obj_cood:
+                                xyz = xyz[:, :, [1, 0, 2]]
+                                xyz[:, :, 0] *= (-1)
+                                viewdir = viewdir[:, :, [1, 0, 2]]
+                                viewdir[:, :, 0] *= (-1)
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -561,7 +586,7 @@ class OptimizerNuScenes:
             self.optimized_ins_flag[instoken] = 1
             self.save_opts(obj_idx)
 
-    def optimize_objs_multi_anns_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5):
+    def optimize_objs_multi_anns_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
@@ -653,12 +678,18 @@ class OptimizerNuScenes:
 
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
-                    # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                     xyz /= obj_diag
-                    xyz = xyz[:, :, [1, 0, 2]]
-                    xyz[:, :, 0] *= (-1)
-                    viewdir = viewdir[:, :, [1, 0, 2]]
-                    viewdir[:, :, 0] *= -1
+                    # Nuscene to ShapeNet: rotate 90 degree around Z
+                    if shapenet_obj_cood:
+                        xyz = xyz[:, :, [1, 0, 2]]
+                        xyz[:, :, 0] *= (-1)
+                        viewdir = viewdir[:, :, [1, 0, 2]]
+                        viewdir[:, :, 0] *= (-1)
+
+                    # Apply symmetric augmentation
+                    if sym_aug and random.uniform(0, 1) > 0.5:
+                        xyz[:, :, 0] *= (-1)
+                        viewdir[:, :, 0] *= (-1)
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
                                               viewdir.to(self.device),
@@ -706,12 +737,13 @@ class OptimizerNuScenes:
                             rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                                     self.hpams['N_samples'])
-                            # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                             xyz /= obj_diag
-                            xyz = xyz[:, :, [1, 0, 2]]
-                            xyz[:, :, 0] *= (-1)
-                            viewdir = viewdir[:, :, [1, 0, 2]]
-                            viewdir[:, :, 0] *= -1
+                            # Nuscene to ShapeNet: rotate 90 degree around Z
+                            if shapenet_obj_cood:
+                                xyz = xyz[:, :, [1, 0, 2]]
+                                xyz[:, :, 0] *= (-1)
+                                viewdir = viewdir[:, :, [1, 0, 2]]
+                                viewdir[:, :, 0] *= (-1)
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
@@ -744,6 +776,65 @@ class OptimizerNuScenes:
             self.optimized_ins_flag[instoken] = 1
             self.log_eval_pose(est_poses, tgt_poses, anntokens)
             self.save_opts_w_pose(obj_idx)
+
+    def generate_obj_sz_reg_samples(self, obj_sz, obj_diag, shapenet_obj_cood=True, tau=0.05, samples_per_plane=10):
+        """
+            Generate samples around limit planes
+        """
+        norm_limits = obj_sz / obj_diag
+        if shapenet_obj_cood:
+            norm_limits = norm_limits[[1, 0, 2]]  # the limit does not care the sign
+        x_lim, y_lim, z_lim = norm_limits
+        out_samples = {}
+        X = np.random.uniform(-x_lim, x_lim, samples_per_plane)
+        Y = np.random.uniform(-y_lim, y_lim, samples_per_plane)
+        Z = np.random.uniform(-z_lim, z_lim, samples_per_plane)
+
+        out_samples['X_planes_out'] = np.concatenate([np.asarray([np.ones(samples_per_plane) * (-x_lim - tau), Y, Z]).transpose(),
+                                                    np.asarray([np.ones(samples_per_plane) * (x_lim + tau), Y, Z]).transpose()],
+                                                   axis=0).astype(np.float32)
+        out_samples['X_planes_in'] = np.concatenate([np.asarray([np.ones(samples_per_plane) * (-x_lim + tau), Y, Z]).transpose(),
+                                                    np.asarray([np.ones(samples_per_plane) * (x_lim - tau), Y, Z]).transpose()],
+                                                   axis=0).astype(np.float32)
+
+        out_samples['Y_planes_out'] = np.concatenate([np.asarray([X, np.ones(samples_per_plane) * (-y_lim - tau), Z]).transpose(),
+                                                    np.asarray([X, np.ones(samples_per_plane) * (y_lim + tau), Z]).transpose()],
+                                                   axis=0).astype(np.float32)
+        out_samples['Y_planes_in'] = np.concatenate([np.asarray([X, np.ones(samples_per_plane) * (-y_lim + tau), Z]).transpose(),
+                                                    np.asarray([X, np.ones(samples_per_plane) * (y_lim - tau), Z]).transpose()],
+                                                   axis=0).astype(np.float32)
+
+        out_samples['Z_planes_out'] = np.concatenate([np.asarray([X, Y, np.ones(samples_per_plane) * (-z_lim - tau)]).transpose(),
+                                                    np.asarray([X, Y, np.ones(samples_per_plane) * (z_lim + tau)]).transpose()],
+                                                   axis=0).astype(np.float32)
+        out_samples['Z_planes_in'] = np.concatenate([np.asarray([X, Y, np.ones(samples_per_plane) * (-z_lim + tau)]).transpose(),
+                                                    np.asarray([X, Y, np.ones(samples_per_plane) * (z_lim - tau)]).transpose()],
+                                                   axis=0).astype(np.float32)
+        return out_samples
+
+    def loss_obj_sz(self, sz_reg_samples, shapecode, texturecode):
+        samples_out = np.concatenate((np.expand_dims(sz_reg_samples['X_planes_out'], 0),
+                                    np.expand_dims(sz_reg_samples['Y_planes_out'], 0),
+                                    np.expand_dims(sz_reg_samples['Z_planes_out'], 0)), axis=0)
+        samples_out = torch.from_numpy(samples_out)
+        samples_in = np.concatenate((np.expand_dims(sz_reg_samples['X_planes_in'], 0),
+                                    np.expand_dims(sz_reg_samples['Y_planes_in'], 0),
+                                    np.expand_dims(sz_reg_samples['Z_planes_in'], 0)), axis=0)
+        samples_in = torch.from_numpy(samples_in)
+
+        sigmas_out, _ = self.model(samples_out.to(self.device),
+                                 torch.ones_like(samples_out).to(self.device),
+                                 shapecode, texturecode)
+        sigmas_in, _ = self.model(samples_in.to(self.device),
+                                 torch.ones_like(samples_in).to(self.device),
+                                 shapecode, texturecode)
+        sigmas_out_max = torch.max(sigmas_out.squeeze(), dim=1).values
+        sigmas_in_max = torch.max(sigmas_in.squeeze(), dim=1).values
+
+        loss = torch.sum(sigmas_out_max ** 2) + \
+               torch.sum((sigmas_in_max - torch.ones_like(sigmas_in_max))**2)
+
+        return loss / 6
 
     def save_opts(self, num_obj):
         saved_dict = {
