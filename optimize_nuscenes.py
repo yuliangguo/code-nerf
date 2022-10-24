@@ -28,9 +28,9 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truth")
     # arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=100)  # Early overfit for single image
+    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=200)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
-    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=20)
+    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=10000)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="nusc.vehicle.car.json")
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
@@ -67,7 +67,7 @@ if __name__ == '__main__':
 
     optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.jsonfile,
                                   args.n_rays, args.num_opts, num_cams_per_sample=1,
-                                  num_workers=args.num_workers, shuffle=True, save_postfix=save_postfix)
+                                  num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
 
     if args.opt_pose:
         if args.multi_ann_ops:

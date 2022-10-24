@@ -270,8 +270,8 @@ class NuScenesData:
                  img_h=900,
                  img_w=1600,
                  add_pose_err=False,
-                 max_rot_pert=0.5,
-                 max_t_pert=0.3,
+                 max_rot_pert=0.2,
+                 max_t_pert=0.1,
                  debug=False,
                  ):
         """
