@@ -271,7 +271,7 @@ class NuScenesData:
                  img_w=1600,
                  add_pose_err=False,
                  max_rot_pert=0.2,
-                 max_t_pert=0.1,
+                 max_t_pert=0.001,
                  debug=False,
                  ):
         """
@@ -408,11 +408,13 @@ class NuScenesData:
                     # ATTENTION: add Rot error in the object's coordinate, and T error
                     if self.add_pose_err:
                         # only consider yaw error and distance error
-                        yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
+                        # yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
+                        yaw_err = random.choice([1., -1.]) * self.max_rot_pert
                         rot_err = np.array([[np.cos(yaw_err), -np.sin(yaw_err), 0.],
                                             [np.sin(yaw_err), np.cos(yaw_err), 0.],
                                             [0., 0., 1.]]).astype(np.float32)
-                        trans_err_ratio = random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert)
+                        # trans_err_ratio = random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert)
+                        trans_err_ratio = 1. + random.choice([1., -1.]) * self.max_t_pert
                         obj_center_w_err = obj_center * trans_err_ratio
                         obj_orientation_w_err = obj_orientation @ rot_err
                         R_c2o_w_err = obj_orientation_w_err.transpose()
@@ -589,11 +591,13 @@ class NuScenesData:
                         # ATTENTION: add Rot error in the object's coordinate, and T error
                         if self.add_pose_err:
                             # only consider yaw error and distance error
-                            yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
+                            # yaw_err = random.uniform(-self.max_rot_pert, self.max_rot_pert)
+                            yaw_err = random.choice([1., -1.]) * self.max_rot_pert
                             rot_err = np.array([[np.cos(yaw_err), -np.sin(yaw_err), 0.],
                                                 [np.sin(yaw_err), np.cos(yaw_err), 0.],
                                                 [0., 0., 1.]]).astype(np.float32)
-                            trans_err_ratio = random.uniform(1.0 - self.max_t_pert, 1.0 + self.max_t_pert)
+                            # trans_err_ratio = random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert)
+                            trans_err_ratio = 1. + random.choice([1., -1.]) * self.max_t_pert
                             obj_center_w_err = obj_center * trans_err_ratio
                             obj_orientation_w_err = obj_orientation @ rot_err
                             R_c2o_w_err = obj_orientation_w_err.transpose()

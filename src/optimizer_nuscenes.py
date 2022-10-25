@@ -232,7 +232,7 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=False, obj_sz_reg=False, euler_rot=False):
+    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=True, euler_rot=False):
         """
             Optimize on each annotation frame independently
         """
@@ -291,7 +291,7 @@ class OptimizerNuScenes:
 
             # First Optimize
             self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec, code_stop_nopts=code_stop_nopts)
-            # self.set_optimizers_w_euler_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
+            # self.set_optimizers_w_poses_model(shapecode, texturecode, rot_vec, trans_vec)
             est_poses = torch.zeros((1, 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
@@ -424,7 +424,7 @@ class OptimizerNuScenes:
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec, code_stop_nopts=code_stop_nopts)
-                    # self.set_optimizers_w_poses_model(shapecode, texturecode, euler_angles_vec, trans_vec)
+                    # self.set_optimizers_w_poses_model(shapecode, texturecode, rot_vec, trans_vec)
 
             # Save the optimized codes
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
@@ -992,7 +992,7 @@ class OptimizerNuScenes:
         lr = self.get_learning_rate()
         # if code_stop_nopts is not None and self.nopts >= code_stop_nopts:
         #     self.opts = torch.optim.AdamW([
-        #         {'params': euler_angles, 'lr': lr},
+        #         {'params': rots, 'lr': lr},
         #         {'params': trans, 'lr': lr}
         #     ])
         # else:
