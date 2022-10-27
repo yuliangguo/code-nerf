@@ -77,7 +77,7 @@ class TrainerNuScenes:
             self.save_models()
             self.nepoch += 1
 
-    def training_single_epoch(self, num_iters, roi_margin=5):
+    def training_single_epoch(self, num_iters, roi_margin=5, sym_aug=True):
         """
             Optimize on each annotation frame independently
         """
@@ -160,8 +160,14 @@ class TrainerNuScenes:
 
                 xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                         self.hpams['N_samples'])
-                # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
-                xyz /= obj_diag
+                xyz /= obj_diag  # normalize to (-1 1)
+
+                # Apply symmetric augmentation
+                if sym_aug and random.uniform(0, 1) > 0.5:
+                    xyz[:, :, 1] *= (-1)
+                    viewdir[:, :, 1] *= (-1)
+
+                # Nuscene to ShapeNet: rotate 90 degree around Z
                 xyz = xyz[:, :, [1, 0, 2]]
                 xyz[:, :, 0] *= (-1)
                 viewdir = viewdir[:, :, [1, 0, 2]]
@@ -174,11 +180,13 @@ class TrainerNuScenes:
                 # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                 loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (
                             torch.sum(torch.abs(mask_occ)) + 1e-9)
-                # Occupancy loss is essential, the BG portion adjust the nerf as well
-                loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                # Occupancy loss
+                loss_occ = torch.sum(
+                    torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                                   torch.sum(torch.abs(mask_occ)) + 1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                # self.loss_total += (loss_rgb + 1e-5 * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
-                self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                self.loss_total += (loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
+                # self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
 
                 self.losses_rgb.append(loss_rgb.detach().item())
                 self.losses_occ.append(loss_occ.detach().item())
@@ -213,13 +221,9 @@ class TrainerNuScenes:
                             generated_img.append(rgb_rays)
                         generated_img = torch.cat(generated_img).reshape(roi[3] - roi[1], roi[2] - roi[0], 3)
 
-                    # generated_img = torch.cat(generated_img)
-                    # generated_img = generated_img.reshape(H,W,3)
-                    # gtimg = imgs[0,-1].reshape(H,W,3)
                     gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
-                    # print(-10*np.log(np.mean(losses_rgb))/np.log(10), self.niter)
 
                 if len(self.losses_rgb) == self.batch_size:
                     print(f'    optimize niter: {self.niter}/{num_iters}, epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}')

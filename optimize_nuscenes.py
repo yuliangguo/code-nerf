@@ -15,6 +15,8 @@ if __name__ == '__main__':
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
     arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_10_06',
                             help="location of saved pretrained model and codes")
+    # arg_parser.add_argument("--model_dir", dest="model_dir", default='exps/srncar_08182022',
+    #                         help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
     arg_parser.add_argument("--seg_cat", dest="seg_cat", default='car',

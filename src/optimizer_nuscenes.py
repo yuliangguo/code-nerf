@@ -155,16 +155,17 @@ class OptimizerNuScenes:
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
                     xyz /= obj_diag
-                    # Nuscene to ShapeNet: rotate 90 degree around Z
+
+                    # Apply symmetric augmentation
+                    if sym_aug and random.uniform(0, 1) > 0.5:
+                        xyz[:, :, 1] *= (-1)
+                        viewdir[:, :, 1] *= (-1)
+
+                    # Nuscene to ShapeNet: frame rotate -90 degree around Z, coord rotate 90 degree around Z
                     if shapenet_obj_cood:
                         xyz = xyz[:, :, [1, 0, 2]]
                         xyz[:, :, 0] *= (-1)
                         viewdir = viewdir[:, :, [1, 0, 2]]
-                        viewdir[:, :, 0] *= (-1)
-
-                    # Apply symmetric augmentation
-                    if sym_aug and random.uniform(0, 1) > 0.5:
-                        xyz[:, :, 0] *= (-1)
                         viewdir[:, :, 0] *= (-1)
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
@@ -173,11 +174,15 @@ class OptimizerNuScenes:
                     rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                     # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss is essential, the BG portion adjust the nerf as well
-                    loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                    # Occupancy loss
+                    loss_occ = torch.sum(
+                        torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                                           torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    # loss_occ = - torch.sum(
+                    #     torch.log(mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1)) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (
+                    #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
                     # Different roi sizes are dealt in save_image later
@@ -211,13 +216,24 @@ class OptimizerNuScenes:
 
                             generated_img = []
                             sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
+                            # generated_acc_trans = []
                             for i in range(0, xyz.shape[0], sample_step):
                                 sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
                                                           viewdir[i:i + sample_step].to(self.device),
                                                           shapecode, texturecode)
                                 rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+                                # rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs,
+                                #                                                          z_vals.to(self.device))
                                 generated_img.append(rgb_rays)
+                                # generated_acc_trans.append(acc_trans_rays)
                             generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
+                            # # debug
+                            # generated_acc_trans = torch.cat(generated_acc_trans).reshape(roi[3] - roi[1],
+                            #                                                              roi[2] - roi[0])
+                            # cv2.imshow('est_occ', ((torch.ones_like(
+                            #     generated_acc_trans) - generated_acc_trans).cpu().numpy() * 255).astype(np.uint8))
+                            # cv2.imshow('mask_occ', ((gt_masks_occ[0].cpu().numpy() + 1) * 0.5 * 255).astype(np.uint8))
+                            # cv2.waitKey()
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
 
                 self.nopts += 1
@@ -232,7 +248,7 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=True, euler_rot=False):
+    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=False, euler_rot=False):
         """
             Optimize on each annotation frame independently
         """
@@ -337,18 +353,18 @@ class OptimizerNuScenes:
 
                 xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                         self.hpams['N_samples'])
-
                 xyz /= obj_diag
+
+                # Apply symmetric augmentation
+                if sym_aug and random.uniform(0, 1) > 0.5:
+                    xyz[:, :, 1] *= (-1)
+                    viewdir[:, :, 1] *= (-1)
+
                 # Nuscene to ShapeNet: rotate 90 degree around Z
                 if shapenet_obj_cood:
                     xyz = xyz[:, :, [1, 0, 2]]
                     xyz[:, :, 0] *= (-1)
                     viewdir = viewdir[:, :, [1, 0, 2]]
-                    viewdir[:, :, 0] *= (-1)
-
-                # Apply symmetric augmentation
-                if sym_aug and random.uniform(0, 1) > 0.5:
-                    xyz[:, :, 0] *= (-1)
                     viewdir[:, :, 0] *= (-1)
 
                 sigmas, rgbs = self.model(xyz.to(self.device),
@@ -358,15 +374,35 @@ class OptimizerNuScenes:
                 # Critical to let rgb supervised on white background
                 # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                 loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                # Occupancy loss is essential, the BG portion adjust the nerf as well
-                loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                # Occupancy loss
+                loss_occ = torch.sum(
+                    torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                                       torch.sum(torch.abs(mask_occ)) + 1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                loss = self.hpams['loss_occ_coef'] * loss_occ
+
+                # # Apply symmetric augmentation
+                # if sym_aug:
+                #     xyz_sym = torch.clone(xyz)
+                #     viewdir_sym = torch.clone(viewdir)
+                #     if shapenet_obj_cood:
+                #         xyz_sym[:, :, 0] *= (-1)
+                #         viewdir_sym[:, :, 0] *= (-1)
+                #     else:
+                #         xyz_sym[:, :, 1] *= (-1)
+                #         viewdir_sym[:, :, 1] *= (-1)
+                #     sigmas_sym, rgbs_sym = self.model(xyz_sym.to(self.device),
+                #                                       viewdir_sym.to(self.device),
+                #                                       shapecode, texturecode)
+                #     loss_sym = torch.mean((sigmas - sigmas_sym) ** 2)
+                #     loss = loss + self.hpams['loss_sym_coef'] * loss_sym
+
                 if obj_sz_reg:
                     sz_reg_samples = self.generate_obj_sz_reg_samples(obj_sz, obj_diag, shapenet_obj_cood, tau=0.05)
                     loss_obj_sz = self.loss_obj_sz(sz_reg_samples, shapecode, texturecode)
                     loss = loss + self.hpams['loss_obj_sz_coef'] * loss_obj_sz
+
                 loss.backward()
                 loss_per_img.append(loss_rgb.detach().item())
                 # Different roi sizes are dealt in save_image later
@@ -407,17 +443,29 @@ class OptimizerNuScenes:
 
                         generated_img = []
                         sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
+                        # debug
+                        generated_acc_trans = []
                         for i in range(0, xyz.shape[0], sample_step):
                             sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
                                                       viewdir[i:i + sample_step].to(self.device),
                                                       shapecode, texturecode)
                             rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+                            # rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs,
+                            #                                                          z_vals.to(self.device))
                             generated_img.append(rgb_rays)
+                            # # debug
+                            # generated_acc_trans.append(acc_trans_rays)
+
                         generated_img = torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3)
                         err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[0], errs_T[0])
                         generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
                                                     cv2.FONT_HERSHEY_SIMPLEX, .3, (1, 0, 0))
                         generated_imgs.append(torch.from_numpy(generated_img))
+                        # # debug
+                        # generated_acc_trans = torch.cat(generated_acc_trans).reshape(roi[3]-roi[1], roi[2]-roi[0])
+                        # cv2.imshow('est_occ', ((torch.ones_like(generated_acc_trans) - generated_acc_trans).cpu().numpy() * 255).astype(np.uint8))
+                        # cv2.imshow('mask_occ', ((gt_masks_occ[0].cpu().numpy() + 1) * 0.5 * 255).astype(np.uint8))
+                        # cv2.waitKey()
 
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
 
@@ -508,16 +556,17 @@ class OptimizerNuScenes:
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
                     xyz /= obj_diag
+
+                    # Apply symmetric augmentation
+                    if sym_aug and random.uniform(0, 1) > 0.5:
+                        xyz[:, :, 1] *= (-1)
+                        viewdir[:, :, 1] *= (-1)
+
                     # Nuscene to ShapeNet: rotate 90 degree around Z
                     if shapenet_obj_cood:
                         xyz = xyz[:, :, [1, 0, 2]]
                         xyz[:, :, 0] *= (-1)
                         viewdir = viewdir[:, :, [1, 0, 2]]
-                        viewdir[:, :, 0] *= (-1)
-
-                    # Apply symmetric augmentation
-                    if sym_aug and random.uniform(0, 1) > 0.5:
-                        xyz[:, :, 0] *= (-1)
                         viewdir[:, :, 0] *= (-1)
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
@@ -526,11 +575,12 @@ class OptimizerNuScenes:
                     rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                     # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss is essential, the BG portion adjust the nerf as well
-                    loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                    # Occupancy loss
+                    loss_occ = torch.sum(
+                        torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                                           torch.sum(torch.abs(mask_occ)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -682,16 +732,17 @@ class OptimizerNuScenes:
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
                                                             self.hpams['N_samples'])
                     xyz /= obj_diag
+
+                    # Apply symmetric augmentation
+                    if sym_aug and random.uniform(0, 1) > 0.5:
+                        xyz[:, :, 1] *= (-1)
+                        viewdir[:, :, 1] *= (-1)
+
                     # Nuscene to ShapeNet: rotate 90 degree around Z
                     if shapenet_obj_cood:
                         xyz = xyz[:, :, [1, 0, 2]]
                         xyz[:, :, 0] *= (-1)
                         viewdir = viewdir[:, :, [1, 0, 2]]
-                        viewdir[:, :, 0] *= (-1)
-
-                    # Apply symmetric augmentation
-                    if sym_aug and random.uniform(0, 1) > 0.5:
-                        xyz[:, :, 0] *= (-1)
                         viewdir[:, :, 0] *= (-1)
 
                     sigmas, rgbs = self.model(xyz.to(self.device),
@@ -700,11 +751,12 @@ class OptimizerNuScenes:
                     rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                     # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss is essential, the BG portion adjust the nerf as well
-                    loss_occ = - torch.sum(torch.log(mask_occ * (0.5 - acc_trans_rays) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                    # Occupancy loss
+                    loss_occ = torch.sum(
+                        torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                                           torch.sum(torch.abs(mask_occ)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -975,7 +1027,7 @@ class OptimizerNuScenes:
         #print(lr)
         self.opts = torch.optim.AdamW([
             {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr*2}
+            {'params': texturecode, 'lr': lr}
         ])
 
     def set_optimizers_w_model(self, shapecode, texturecode):
@@ -998,7 +1050,7 @@ class OptimizerNuScenes:
         # else:
         self.opts = torch.optim.AdamW([
             {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr*2},
+            {'params': texturecode, 'lr': lr},
             {'params': rots, 'lr': lr},
             {'params': trans, 'lr':  lr}
         ])
@@ -1010,7 +1062,7 @@ class OptimizerNuScenes:
         self.opts = torch.optim.AdamW([
             {'params': self.model.parameters(), 'lr': lr1},
             {'params': shapecode, 'lr': lr2},
-            {'params': texturecode, 'lr': lr2*2},
+            {'params': texturecode, 'lr': lr2},
             {'params': rots, 'lr': lr2},
             {'params': trans, 'lr':  lr2}
         ])
@@ -1037,8 +1089,6 @@ class OptimizerNuScenes:
             self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1, -1)
             self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1, -1)
 
-    # def make_writer(self):
-    #     self.writer = SummaryWriter(os.path.join(self.save_dir, 'tensorboard'))
 
     def make_save_img_dir(self, save_dir):
         save_dir_tmp = save_dir + '/test' + self.save_postfix
