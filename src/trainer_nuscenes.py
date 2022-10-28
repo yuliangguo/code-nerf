@@ -17,7 +17,7 @@ import math
 
 
 class TrainerNuScenes:
-    def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, jsonfile='srncar.json', batch_size=2,
+    def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, resume_from_epoch=None, jsonfile='srncar.json', batch_size=2,
                  n_rays=2048, num_workers=0, shuffle=False, check_iter=1000, save_iter=10000):
         """
         :param pretrained_model_dir: the directory of pre-trained model
@@ -37,6 +37,8 @@ class TrainerNuScenes:
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
         self.save_iter = save_iter
+        self.make_savedir(save_dir)
+        print('we are going to save at ', self.save_dir)
 
         # initialize model
         self.make_model()
@@ -56,10 +58,12 @@ class TrainerNuScenes:
                 idx += 1
         self.optimized_idx = torch.zeros(len(self.instoken2idx.keys()))
         self.make_codes()
-        self.make_savedir(save_dir)
-        print('we are going to save at ', self.save_dir)
 
-    def training(self, iters_all):
+        # Load from epoch requires initialization before
+        if resume_from_epoch is not None:
+            self.resume_from_epoch(save_dir, resume_from_epoch)
+
+    def training(self, epochs):
 
         # initialize the losses here to avoid memory leak between epochs
         self.losses_rgb = []
@@ -70,25 +74,21 @@ class TrainerNuScenes:
         self.opts.zero_grad()
         self.t1 = time.time()
 
-        while self.niter < iters_all:
+        while self.nepoch < epochs:
             print(f'epoch: {self.nepoch}')
-            self.training_single_epoch(iters_all)
+            self.training_single_epoch()
 
-            self.save_models()
+            self.save_models(epoch=self.nepoch)
             self.nepoch += 1
 
-    def training_single_epoch(self, num_iters, roi_margin=5, sym_aug=True):
+    def training_single_epoch(self, roi_margin=5, sym_aug=True):
         """
             Optimize on each annotation frame independently
         """
 
         cam_id = 0
-        # optimized_batch = False
-
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
-            if self.niter >= num_iters:
-                break
 
             # imgs_b, masks_occ_b, rois_b, cam_intrinsics_b, cam_poses_b, valid_flags_b, instoken_b, anntoken_b = batch_data
             # for obj_idx, imgs in enumerate(imgs_b):
@@ -226,7 +226,7 @@ class TrainerNuScenes:
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
 
                 if len(self.losses_rgb) == self.batch_size:
-                    print(f'    optimize niter: {self.niter}/{num_iters}, epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}')
+                    print(f'    optimize niter: {self.niter}, epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}')
                     # optimize when collected a batch of qualified samples
                     self.loss_total.backward()
                     self.opts.step()
@@ -240,8 +240,8 @@ class TrainerNuScenes:
                     self.losses_reg = []
                     self.loss_total = torch.zeros(1).to(self.device)
 
-                    if self.niter % self.save_iter == 0:
-                        self.save_models(self.niter)
+                    # if self.niter % self.save_iter == 0:
+                    #     self.save_models(self.niter)
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
@@ -298,9 +298,8 @@ class TrainerNuScenes:
         self.shape_codes = self.shape_codes.to(self.device)
         self.texture_codes = self.texture_codes.to(self.device)
 
-    def load_pretrained_model_codes(self, saved_dir):
-        saved_path = os.path.join('exps', saved_dir, 'models.pth')
-        saved_data = torch.load(saved_path, map_location = torch.device('cpu'))
+    def load_pretrained_model_codes(self, saved_model_file):
+        saved_data = torch.load(saved_model_file, map_location = torch.device('cpu'))
         self.model.load_state_dict(saved_data['model_params'])
         self.model = self.model.to(self.device)
         # mean shape should only consider those optimized codes when some of those are not touched
@@ -321,7 +320,7 @@ class TrainerNuScenes:
         with open(hpampath, 'w') as f:
             json.dump(self.hpams, f, indent=2)
 
-    def save_models(self, iter=None):
+    def save_models(self, iter=None, epoch=None):
         save_dict = {'model_params': self.model.state_dict(),
                      'shape_code_params': self.shape_codes.state_dict(),
                      'texture_code_params': self.texture_codes.state_dict(),
@@ -332,5 +331,22 @@ class TrainerNuScenes:
                      }
         if iter != None:
             torch.save(save_dict, os.path.join(self.save_dir, str(iter) + '.pth'))
+        if epoch != None:
+            torch.save(save_dict, os.path.join(self.save_dir, f'epoch_{epoch}.pth'))
         torch.save(save_dict, os.path.join(self.save_dir, 'models.pth'))
+
+    def resume_from_epoch(self, saved_dir, epoch):
+        print(f'Resume training from saved model at epoch {epoch}.')
+        saved_path = os.path.join('exps_nuscenes', saved_dir, f'epoch_{epoch}.pth')
+        saved_data = torch.load(saved_path, map_location=torch.device('cpu'))
+
+        self.model.load_state_dict(saved_data['model_params'])
+        self.model = self.model.to(self.device)
+        self.shape_codes.load_state_dict(saved_data['shape_code_params'])
+        self.texture_codes.load_state_dict(saved_data['texture_code_params'])
+        self.niter = saved_data['niter']
+        self.nepoch = saved_data['nepoch'] + 1
+        self.instoken2idx = saved_data['instoken2idx']
+        self.optimized_idx = saved_data['optimized_idx']
+
 

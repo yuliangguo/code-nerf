@@ -27,11 +27,12 @@ if __name__ == '__main__':
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
-                            help="version number required to load nuscene ground-truh")
+                            help="version number required to load nuscene ground-truth")
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=6)
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1024)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
-    arg_parser.add_argument("--iters_all", dest="iters_all", default=1200000)
+    arg_parser.add_argument("--epochs", dest="epochs", default=20)
+    arg_parser.add_argument("--resume_from_epoch", dest="resume_from_epoch", default=None)
 
     args = arg_parser.parse_args()
 
@@ -56,6 +57,6 @@ if __name__ == '__main__':
         debug=False)
 
     trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
-                              args.pretrained_model_dir, args.jsonfile, args.batch_size,
+                              args.pretrained_model_dir, args.resume_from_epoch, args.jsonfile, args.batch_size,
                               args.n_rays, num_workers=args.num_workers, shuffle=True)
-    trainer.training(args.iters_all)
+    trainer.training(args.epochs)
