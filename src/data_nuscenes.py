@@ -271,7 +271,7 @@ class NuScenesData:
                  img_w=1600,
                  add_pose_err=False,
                  max_rot_pert=0.2,
-                 max_t_pert=0.001,
+                 max_t_pert=0.1,
                  debug=False,
                  ):
         """
@@ -690,9 +690,9 @@ class NuScenesData:
                                                          linewidth=2, edgecolor='y', facecolor='none')
                                 axes[1].add_patch(rect)
                                 plt.show()
-
-                    if len(imgs) == 1:
-                        break
+                    # ATTENTION: do not need this when multiple images are to output
+                    # if len(imgs) == 1:
+                    #     break
 
         if len(imgs) == 0:
             if self.add_pose_err:

@@ -13,7 +13,7 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_10_06',
+    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_11_02',
                             help="location of saved pretrained model and codes")
     # arg_parser.add_argument("--model_dir", dest="model_dir", default='exps/srncar_08182022',
     #                         help="location of saved pretrained model and codes")
@@ -37,10 +37,14 @@ if __name__ == '__main__':
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="nusc.vehicle.car.json")
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
-    arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=False,
+    arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
                             help="if to optimize multiple annotations of the same instance jointly")
-    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True,
+    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=False,
                             help="if to optimize camera poses, if true the dataloader will generate erroneous poses")
+    arg_parser.add_argument("--rot_err", dest="rot_err", default=0.2,
+                            help='add rotation error in rad to data loading when optimizing pose')
+    arg_parser.add_argument("--t_err", dest="t_err", default=0.001,
+                            help='add translation error in ratio added in data loading when optimizing pose')
 
     args = arg_parser.parse_args()
 
@@ -65,7 +69,10 @@ if __name__ == '__main__':
         img_h=900,
         img_w=1600,
         debug=False,
-        add_pose_err=args.opt_pose)
+        add_pose_err=args.opt_pose,
+        max_rot_pert=args.rot_err,
+        max_t_pert=args.t_err,
+    )
 
     optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.jsonfile,
                                   args.n_rays, args.num_opts, num_cams_per_sample=1,

@@ -344,7 +344,7 @@ class TrainerNuScenes:
         self.model = self.model.to(self.device)
         self.shape_codes.load_state_dict(saved_data['shape_code_params'])
         self.texture_codes.load_state_dict(saved_data['texture_code_params'])
-        self.niter = saved_data['niter']
+        self.niter = saved_data['niter'] + 1
         self.nepoch = saved_data['nepoch'] + 1
         self.instoken2idx = saved_data['instoken2idx']
         self.optimized_idx = saved_data['optimized_idx']

@@ -248,7 +248,7 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=False, euler_rot=False):
+    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=False, obj_sz_reg=True, euler_rot=False):
         """
             Optimize on each annotation frame independently
         """
@@ -1049,8 +1049,8 @@ class OptimizerNuScenes:
         #     ])
         # else:
         self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr},
+            # {'params': shapecode, 'lr': lr},
+            # {'params': texturecode, 'lr': lr},
             {'params': rots, 'lr': lr},
             {'params': trans, 'lr':  lr}
         ])
