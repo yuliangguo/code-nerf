@@ -200,8 +200,11 @@ class OptimizerNuScenes:
                             generated_img = self.render_full_img(tgt_pose, obj_sz, K, roi, shapecode, texturecode,
                                                                  shapenet_obj_cood)
                             generated_imgs.append(generated_img)
-                    self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
-
+                        self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
+                        # save virtual views at the beginning and the end
+                        if self.nopts == 0 or self.nopts == (self.num_opts-1):
+                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode, shapenet_obj_cood)
+                            self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
                     self.set_optimizers(shapecode, texturecode)
@@ -398,7 +401,13 @@ class OptimizerNuScenes:
                         generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
                                                     cv2.FONT_HERSHEY_SIMPLEX, .3, (1, 0, 0))
                         generated_imgs.append(torch.from_numpy(generated_img))
-                    self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
+                        self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
+
+                        # save virtual views at the beginning and the end
+                        if self.nopts == 0 or self.nopts == (self.num_opts - 1):
+                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
+                                                                    shapenet_obj_cood)
+                            self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec, code_stop_nopts=code_stop_nopts)
@@ -533,7 +542,14 @@ class OptimizerNuScenes:
                             # render full image
                             generated_img = self.render_full_img(tgt_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood)
                             generated_imgs.append(generated_img)
-                    self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
+                        self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
+
+                        # save virtual views at the beginning and the end
+                        if self.nopts == 0 or self.nopts == (self.num_opts - 1):
+                            obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[0])['size']
+                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
+                                                                    shapenet_obj_cood)
+                            self.save_virtual_img(virtual_imgs, instoken, self.nopts)
 
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
@@ -700,8 +716,14 @@ class OptimizerNuScenes:
                             # save the last pose for later evaluation
                             if self.nopts == (self.num_opts - 1):
                                 est_poses[num] = pose2opt.detach().cpu()
-                    self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
+                        self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
 
+                        # save virtual views at the beginning and the end
+                        if self.nopts == 0 or self.nopts == (self.num_opts - 1):
+                            obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[0])['size']
+                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
+                                                                    shapenet_obj_cood)
+                            self.save_virtual_img(virtual_imgs, instoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec, code_stop_nopts=code_stop_nopts)
@@ -842,6 +864,35 @@ class OptimizerNuScenes:
 
         return generated_img
 
+    def render_virtual_imgs(self, obj_sz, K, shapecode, texturecode, shapenet_obj_cood, radius=40., tilt=np.pi/6, pan_num=8, img_sz=128):
+        virtual_imgs = []
+        x_min = K[0, 2] - img_sz/2
+        x_max = K[0, 2] + img_sz/2
+        y_min = K[1, 2] - img_sz/2
+        y_max = K[1, 2] + img_sz/2
+        roi = np.asarray([x_min, y_min, x_max, y_max]).astype(np.int)
+        # sample camera with fixed radius, tilt, and pan angles spanning 2 pi
+        cam_init = np.asarray([[0,   0,  1, -radius],
+                               [-1,  0,  0, 0],
+                               [0,  -1,  0, 0],
+                               [0,   0,  0, 1]]).astype(np.float32)
+        cam_tilt = np.asarray([[np.cos(tilt),   0, np.sin(tilt), 0],
+                               [0,              1, 0,             0],
+                               [-np.sin(tilt),   0, np.cos(tilt),  0],
+                               [0,              0, 0,             1]]).astype(np.float32) @ cam_init
+
+        pan_angles = np.linspace(0, 2*np.pi, pan_num, endpoint=False)
+        for pan in pan_angles:
+            cam_pose = np.asarray([[np.cos(pan),   -np.sin(pan), 0, 0],
+                                   [np.sin(pan),   np.cos(pan),  0, 0],
+                                   [0,              0,           1, 0],
+                                   [0,              0,           0, 1]]).astype(np.float32) @ cam_tilt
+            cam_pose = torch.from_numpy(cam_pose[:3, :])
+            generated_img = self.render_full_img(cam_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood)
+            virtual_imgs.append(generated_img)
+
+        return virtual_imgs
+
     def align_imgs_width(self, imgs, W, max_view=4):
         """
             imgs: a list of tensors
@@ -891,6 +942,21 @@ class OptimizerNuScenes:
             os.makedirs(save_img_dir)
         # imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_{:03d}'.format(instance_num) + '.png'), ret)
         imageio.imwrite(os.path.join(save_img_dir, 'opt' + '{:03d}'.format(instance_num) + '.png'), ret)
+
+    def save_virtual_img(self, imgs, obj_id, instance_num=None):
+        H, W = imgs[0].shape[:2]
+        # nviews = len(gt_imgs)
+
+        img_out = torch.cat(imgs).reshape(-1, W, 3)
+        img_out = image_float_to_uint8(img_out.detach().cpu().numpy())
+        img_out = np.concatenate([img_out[:4*H, ...], img_out[4*H:, ...]], axis=1)
+        save_img_dir = os.path.join(self.save_dir, obj_id)
+        if not os.path.isdir(save_img_dir):
+            os.makedirs(save_img_dir)
+        if instance_num is None:
+            imageio.imwrite(os.path.join(save_img_dir, 'virt_final.png'), img_out)
+        else:
+            imageio.imwrite(os.path.join(save_img_dir, 'virt_opt' + '{:03d}'.format(instance_num) + '.png'), img_out)
 
     def log_compute_ssim(self, generated_img, gt_img, niters, obj_idx):
         generated_img_np = generated_img.detach().cpu().numpy()
