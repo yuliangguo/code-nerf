@@ -174,15 +174,13 @@ class OptimizerNuScenes:
                     rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                     # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss
-                    loss_occ = torch.sum(
-                        torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                                           torch.sum(torch.abs(mask_occ)) + 1e-9)
-                    # loss_occ = - torch.sum(
-                    #     torch.log(mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1)) + 0.5 + 1e-9) * torch.abs(mask_occ)) / (
+                    # # Occupancy loss
+                    # loss_occ = torch.sum(
+                    #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
                     #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
                     # Different roi sizes are dealt in save_image later
@@ -216,7 +214,7 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=False, obj_sz_reg=True, euler_rot=False):
+    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=False, euler_rot=False):
         """
             Optimize on each annotation frame independently
         """
@@ -341,13 +339,13 @@ class OptimizerNuScenes:
                 # Critical to let rgb supervised on white background
                 # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                 loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                # Occupancy loss
-                loss_occ = torch.sum(
-                    torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                                       torch.sum(torch.abs(mask_occ)) + 1e-9)
+                # # Occupancy loss
+                # loss_occ = torch.sum(
+                #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                 # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                loss = self.hpams['loss_occ_coef'] * loss_occ
+                loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
 
                 # # Apply symmetric augmentation
                 # if sym_aug:
@@ -394,7 +392,7 @@ class OptimizerNuScenes:
                         pose2opt = est_poses[0]
                         # render full image
                         generated_img = self.render_full_img(pose2opt, obj_sz, K, roi, shapecode, texturecode,
-                                                             shapenet_obj_cood)
+                                                             shapenet_obj_cood, debug_occ=False)
                         # mark pose error on the image
                         err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[0], errs_T[0])
                         generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
@@ -507,12 +505,13 @@ class OptimizerNuScenes:
                     rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                     # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss
-                    loss_occ = torch.sum(
-                        torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                                           torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    # # Occupancy loss
+                    # loss_occ = torch.sum(
+                    #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                    #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 
@@ -659,12 +658,13 @@ class OptimizerNuScenes:
                     rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                     # loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - tgt_img) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
-                    # Occupancy loss
-                    loss_occ = torch.sum(
-                        torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                                           torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    # # Occupancy loss
+                    # loss_occ = torch.sum(
+                    #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
+                    #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
+                    loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
 

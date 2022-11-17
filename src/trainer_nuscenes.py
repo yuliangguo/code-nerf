@@ -185,8 +185,9 @@ class TrainerNuScenes:
                     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
                                    torch.sum(torch.abs(mask_occ)) + 1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                self.loss_total += (loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
+                # self.loss_total += (loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
                 # self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                self.loss_total += loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
 
                 self.losses_rgb.append(loss_rgb.detach().item())
                 self.losses_occ.append(loss_occ.detach().item())
