@@ -198,42 +198,10 @@ class OptimizerNuScenes:
                     with torch.no_grad():
                         for num, cam_id in enumerate(cam_ids):
                             tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
-
-                            # near and far sample range need to be adaptively calculated
-                            near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
-                            far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
-
-                            rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
-                            xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                                    self.hpams['N_samples'])
-                            xyz /= obj_diag
-                            # Nuscene to ShapeNet: rotate 90 degree around Z
-                            if shapenet_obj_cood:
-                                xyz = xyz[:, :, [1, 0, 2]]
-                                xyz[:, :, 0] *= (-1)
-                                viewdir = viewdir[:, :, [1, 0, 2]]
-                                viewdir[:, :, 0] *= (-1)
-
-                            generated_img = []
-                            sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
-                            # generated_acc_trans = []
-                            for i in range(0, xyz.shape[0], sample_step):
-                                sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                                          viewdir[i:i + sample_step].to(self.device),
-                                                          shapecode, texturecode)
-                                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                                # rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs,
-                                #                                                          z_vals.to(self.device))
-                                generated_img.append(rgb_rays)
-                                # generated_acc_trans.append(acc_trans_rays)
-                            generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
-                            # # debug
-                            # generated_acc_trans = torch.cat(generated_acc_trans).reshape(roi[3] - roi[1],
-                            #                                                              roi[2] - roi[0])
-                            # cv2.imshow('est_occ', ((torch.ones_like(
-                            #     generated_acc_trans) - generated_acc_trans).cpu().numpy() * 255).astype(np.uint8))
-                            # cv2.imshow('mask_occ', ((gt_masks_occ[0].cpu().numpy() + 1) * 0.5 * 255).astype(np.uint8))
-                            # cv2.waitKey()
+                            # render full image
+                            generated_img = self.render_full_img(tgt_pose, obj_sz, K, roi, shapecode, texturecode,
+                                                                 shapenet_obj_cood)
+                            generated_imgs.append(generated_img)
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
 
                 self.nopts += 1
@@ -256,7 +224,6 @@ class OptimizerNuScenes:
         self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
         code_stop_nopts = lr_half_interval  # stop updating codes early to focus on pose updates
 
-        # cam_ids = torch.tensor(cam_ids)
         # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
         cam_ids = [0]
         # Per object
@@ -425,50 +392,15 @@ class OptimizerNuScenes:
                         # for num, cam_id in enumerate(cam_ids):
                         tgt_pose, roi, K = tgt_poses[0], rois[0], cam_intrinsics[0]
                         pose2opt = est_poses[0]
-
-                        # near and far sample range need to be adaptively calculated
-                        near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
-                        far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
-
-                        rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
-                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                                self.hpams['N_samples'])
-                        xyz /= obj_diag
-                        # Nuscene to ShapeNet: rotate 90 degree around Z
-                        if shapenet_obj_cood:
-                            xyz = xyz[:, :, [1, 0, 2]]
-                            xyz[:, :, 0] *= (-1)
-                            viewdir = viewdir[:, :, [1, 0, 2]]
-                            viewdir[:, :, 0] *= (-1)
-
-                        generated_img = []
-                        sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
-                        # debug
-                        generated_acc_trans = []
-                        for i in range(0, xyz.shape[0], sample_step):
-                            sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                                      viewdir[i:i + sample_step].to(self.device),
-                                                      shapecode, texturecode)
-                            rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                            # rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs,
-                            #                                                          z_vals.to(self.device))
-                            generated_img.append(rgb_rays)
-                            # # debug
-                            # generated_acc_trans.append(acc_trans_rays)
-
-                        generated_img = torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3)
+                        # render full image
+                        generated_img = self.render_full_img(pose2opt, obj_sz, K, roi, shapecode, texturecode,
+                                                             shapenet_obj_cood)
+                        # mark pose error on the image
                         err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[0], errs_T[0])
                         generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
                                                     cv2.FONT_HERSHEY_SIMPLEX, .3, (1, 0, 0))
                         generated_imgs.append(torch.from_numpy(generated_img))
-                        # # debug
-                        # generated_acc_trans = torch.cat(generated_acc_trans).reshape(roi[3]-roi[1], roi[2]-roi[0])
-                        # cv2.imshow('est_occ', ((torch.ones_like(generated_acc_trans) - generated_acc_trans).cpu().numpy() * 255).astype(np.uint8))
-                        # cv2.imshow('mask_occ', ((gt_masks_occ[0].cpu().numpy() + 1) * 0.5 * 255).astype(np.uint8))
-                        # cv2.waitKey()
-
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
-
                 self.nopts += 1
                 if self.nopts % lr_half_interval == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec, code_stop_nopts=code_stop_nopts)
@@ -598,34 +530,10 @@ class OptimizerNuScenes:
                     with torch.no_grad():
                         for num in range(0, tgt_imgs.shape[0]):
                             tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
-
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
-                            obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-
-                            # near and far sample range need to be adaptively calculated
-                            near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
-                            far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
-
-                            rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
-                            xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                                    self.hpams['N_samples'])
-                            xyz /= obj_diag
-                            # Nuscene to ShapeNet: rotate 90 degree around Z
-                            if shapenet_obj_cood:
-                                xyz = xyz[:, :, [1, 0, 2]]
-                                xyz[:, :, 0] *= (-1)
-                                viewdir = viewdir[:, :, [1, 0, 2]]
-                                viewdir[:, :, 0] *= (-1)
-
-                            generated_img = []
-                            sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
-                            for i in range(0, xyz.shape[0], sample_step):
-                                sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                                          viewdir[i:i + sample_step].to(self.device),
-                                                          shapecode, texturecode)
-                                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                                generated_img.append(rgb_rays)
-                            generated_imgs.append(torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3))
+                            # render full image
+                            generated_img = self.render_full_img(tgt_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood)
+                            generated_imgs.append(generated_img)
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
 
                 self.nopts += 1
@@ -781,43 +689,17 @@ class OptimizerNuScenes:
                         for num in range(0, tgt_imgs.shape[0]):
                             tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
                             pose2opt = est_poses[num]
-
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
-                            obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-
-                            # near and far sample range need to be adaptively calculated
-                            near = np.linalg.norm(pose2opt[:, -1].tolist()) - obj_diag / 2
-                            far = np.linalg.norm(pose2opt[:, -1].tolist()) + obj_diag / 2
-
-                            rays_o, viewdir = get_rays_nuscenes(K, pose2opt, roi)
-                            xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                                    self.hpams['N_samples'])
-                            xyz /= obj_diag
-                            # Nuscene to ShapeNet: rotate 90 degree around Z
-                            if shapenet_obj_cood:
-                                xyz = xyz[:, :, [1, 0, 2]]
-                                xyz[:, :, 0] *= (-1)
-                                viewdir = viewdir[:, :, [1, 0, 2]]
-                                viewdir[:, :, 0] *= (-1)
-
-                            generated_img = []
-                            sample_step = np.maximum(roi[2]-roi[0], roi[3]-roi[1])
-                            for i in range(0, xyz.shape[0], sample_step):
-                                sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                                          viewdir[i:i + sample_step].to(self.device),
-                                                          shapecode, texturecode)
-                                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                                generated_img.append(rgb_rays)
-                            generated_img = torch.cat(generated_img).reshape(roi[3]-roi[1], roi[2]-roi[0], 3)
+                            # render full image
+                            generated_img = self.render_full_img(pose2opt, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood)
+                            # mark pose error on the image
                             err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[num], errs_T[num])
                             generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
                                                         cv2.FONT_HERSHEY_SIMPLEX, .3, (1, 0, 0))
                             generated_imgs.append(torch.from_numpy(generated_img))
-
                             # save the last pose for later evaluation
                             if self.nopts == (self.num_opts - 1):
                                 est_poses[num] = pose2opt.detach().cpu()
-
                     self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
 
                 self.nopts += 1
@@ -918,6 +800,47 @@ class OptimizerNuScenes:
         }
         torch.save(saved_dict, os.path.join(self.save_dir, 'codes+poses.pth'))
         # print('We finished the optimization of ' + str(num_obj))
+
+    def render_full_img(self, cam_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood, debug_occ=False):
+        obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+
+        # near and far sample range need to be adaptively calculated
+        near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
+        far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
+
+        rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
+        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
+                                                self.hpams['N_samples'])
+        xyz /= obj_diag
+        # Nuscene to ShapeNet: rotate 90 degree around Z
+        if shapenet_obj_cood:
+            xyz = xyz[:, :, [1, 0, 2]]
+            xyz[:, :, 0] *= (-1)
+            viewdir = viewdir[:, :, [1, 0, 2]]
+            viewdir[:, :, 0] *= (-1)
+
+        generated_img = []
+        generated_acc_trans = []
+        sample_step = np.maximum(roi[2] - roi[0], roi[3] - roi[1])
+        for i in range(0, xyz.shape[0], sample_step):
+            sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
+                                      viewdir[i:i + sample_step].to(self.device),
+                                      shapecode, texturecode)
+            if debug_occ:
+                rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
+                generated_acc_trans.append(acc_trans_rays)
+            else:
+                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
+            generated_img.append(rgb_rays)
+        generated_img = torch.cat(generated_img).reshape(roi[3] - roi[1], roi[2] - roi[0], 3)
+
+        if debug_occ:
+            generated_acc_trans = torch.cat(generated_acc_trans).reshape(roi[3]-roi[1], roi[2]-roi[0])
+            cv2.imshow('est_occ', ((torch.ones_like(generated_acc_trans) - generated_acc_trans).cpu().numpy() * 255).astype(np.uint8))
+            # cv2.imshow('mask_occ', ((gt_masks_occ[0].cpu().numpy() + 1) * 0.5 * 255).astype(np.uint8))
+            cv2.waitKey()
+
+        return generated_img
 
     def align_imgs_width(self, imgs, W, max_view=4):
         """
@@ -1049,8 +972,8 @@ class OptimizerNuScenes:
         #     ])
         # else:
         self.opts = torch.optim.AdamW([
-            # {'params': shapecode, 'lr': lr},
-            # {'params': texturecode, 'lr': lr},
+            {'params': shapecode, 'lr': lr},
+            {'params': texturecode, 'lr': lr},
             {'params': rots, 'lr': lr},
             {'params': trans, 'lr':  lr}
         ])
@@ -1089,7 +1012,6 @@ class OptimizerNuScenes:
             self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1, -1)
             self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1, -1)
 
-
     def make_save_img_dir(self, save_dir):
         save_dir_tmp = save_dir + '/test' + self.save_postfix
         num = 2
@@ -1099,4 +1021,3 @@ class OptimizerNuScenes:
 
         os.makedirs(save_dir_tmp)
         self.save_dir = save_dir_tmp
-
