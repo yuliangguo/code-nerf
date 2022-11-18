@@ -13,6 +13,7 @@ def get_rays(H, W, focal, c2w):
     i, j = torch.meshgrid(torch.linspace(0, W - 1, W), torch.linspace(0, H - 1, H))
     i = i.t()
     j = j.t()
+    # TODO: such dir seems to be based on wield camera pose c2w and camera frame definition
     dirs = torch.stack([(i - W * .5) / focal, -(j - H * .5) / focal, -torch.ones_like(i)], -1)
     rays_d = torch.sum(dirs[..., np.newaxis, :].type_as(c2w) * c2w[..., :3, :3], -1)
     viewdirs = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)

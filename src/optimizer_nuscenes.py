@@ -889,7 +889,30 @@ class OptimizerNuScenes:
                                    [0,              0,           0, 1]]).astype(np.float32) @ cam_tilt
             cam_pose = torch.from_numpy(cam_pose[:3, :])
             generated_img = self.render_full_img(cam_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood)
-            virtual_imgs.append(generated_img)
+            # draw the object coordinate basis
+            R_w2c = cam_pose[:3, :3].transpose(-1, -2)
+            T_w2c = -torch.matmul(R_w2c, cam_pose[:3, 3:])
+            P_w2c = torch.cat((R_w2c, T_w2c), dim=1).numpy()
+            x_arrow_2d = K @ P_w2c @ torch.asarray([.5, 0., 0., 1.]).reshape([-1, 1])
+            x_arrow_2d = (x_arrow_2d[:2] / x_arrow_2d[2]).squeeze().numpy() - K[:2, 2].numpy()
+            y_arrow_2d = K @ P_w2c @ torch.asarray([0., .5, 0., 1.]).reshape([-1, 1])
+            y_arrow_2d = (y_arrow_2d[:2] / y_arrow_2d[2]).squeeze().numpy() - K[:2, 2].numpy()
+            z_arrow_2d = K @ P_w2c @ torch.asarray([0., 0., .5, 1.]).reshape([-1, 1])
+            z_arrow_2d = (z_arrow_2d[:2] / z_arrow_2d[2]).squeeze().numpy() - K[:2, 2].numpy()
+            generated_img = generated_img.cpu().numpy()
+            generated_img = cv2.arrowedLine(generated_img,
+                                            (int(img_sz / 2), int(img_sz / 2)),
+                                            (int(img_sz/2 + x_arrow_2d[0]), int(img_sz/2 + x_arrow_2d[1])),
+                                            (1, 0, 0))
+            generated_img = cv2.arrowedLine(generated_img,
+                                            (int(img_sz / 2), int(img_sz / 2)),
+                                            (int(img_sz/2 + y_arrow_2d[0]), int(img_sz/2 + y_arrow_2d[1])),
+                                            (0, 1, 0))
+            generated_img = cv2.arrowedLine(generated_img,
+                                            (int(img_sz / 2), int(img_sz / 2)),
+                                            (int(img_sz/2 + z_arrow_2d[0]), int(img_sz/2 + z_arrow_2d[1])),
+                                            (0, 0, 1))
+            virtual_imgs.append(torch.from_numpy(generated_img))
 
         return virtual_imgs
 
