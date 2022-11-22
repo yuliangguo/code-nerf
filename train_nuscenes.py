@@ -7,6 +7,7 @@ import argparse
 from datetime import date
 
 from src.trainer_nuscenes import TrainerNuScenes
+from src.trainer_autorf_nuscenes import TrainerAutoRFNuScenes
 from src.data_nuscenes import NuScenesData
 
 
@@ -31,6 +32,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=6)
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1024)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
+    arg_parser.add_argument("--arch", dest="arch", type=str, default='autorf')
     arg_parser.add_argument("--epochs", dest="epochs", default=20)
     arg_parser.add_argument("--resume_from_epoch", dest="resume_from_epoch", default=None)
 
@@ -56,7 +58,12 @@ if __name__ == '__main__':
         img_w=1600,
         debug=False)
 
-    trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
-                              args.pretrained_model_dir, args.resume_from_epoch, args.jsonfile, args.batch_size,
-                              args.n_rays, num_workers=args.num_workers, shuffle=True)
+    if args.arch is 'autorf':
+        trainer = TrainerAutoRFNuScenes(save_dir, args.gpu, nusc_dataset,
+                                        args.pretrained_model_dir, args.resume_from_epoch, args.jsonfile, args.batch_size,
+                                        args.n_rays, num_workers=args.num_workers, shuffle=True)
+    else:
+        trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
+                                  args.pretrained_model_dir, args.resume_from_epoch, args.jsonfile, args.batch_size,
+                                  args.n_rays, num_workers=args.num_workers, shuffle=True)
     trainer.training(args.epochs)

@@ -7,6 +7,7 @@ import argparse
 
 from src.utils import str2bool
 from src.optimizer_nuscenes import OptimizerNuScenes
+from src.optimizer_autorf_nuscenes import OptimizerAutoRFNuScenes
 from src.data_nuscenes import NuScenesData
 
 
