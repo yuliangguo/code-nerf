@@ -16,7 +16,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
     arg_parser.add_argument("--pretrained_model_dir", dest="pretrained_model_dir", default=None,
                             help="location of saved pretrained model and codes")
-    arg_parser.add_argument("--jsonfile", dest="jsonfile", default="nusc.vehicle.car.json")
+    arg_parser.add_argument("--config_file", dest="config_file", default="autorf.nusc.vehicle.car.json")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
     arg_parser.add_argument("--seg_cat", dest="seg_cat", default='car',
@@ -32,7 +32,6 @@ if __name__ == '__main__':
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=6)
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1024)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
-    arg_parser.add_argument("--arch", dest="arch", type=str, default='autorf')
     arg_parser.add_argument("--epochs", dest="epochs", default=20)
     arg_parser.add_argument("--resume_from_epoch", dest="resume_from_epoch", default=None)
 
@@ -58,12 +57,12 @@ if __name__ == '__main__':
         img_w=1600,
         debug=False)
 
-    if args.arch is 'autorf':
+    if 'autorf' in args.config_file:
         trainer = TrainerAutoRFNuScenes(save_dir, args.gpu, nusc_dataset,
-                                        args.pretrained_model_dir, args.resume_from_epoch, args.jsonfile, args.batch_size,
-                                        args.n_rays, num_workers=args.num_workers, shuffle=True)
+                                        args.pretrained_model_dir, args.resume_from_epoch, args.config_file,
+                                        args.batch_size, args.n_rays, num_workers=args.num_workers, shuffle=True)
     else:
         trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
-                                  args.pretrained_model_dir, args.resume_from_epoch, args.jsonfile, args.batch_size,
+                                  args.pretrained_model_dir, args.resume_from_epoch, args.config_file, args.batch_size,
                                   args.n_rays, num_workers=args.num_workers, shuffle=True)
     trainer.training(args.epochs)

@@ -18,7 +18,7 @@ import math
 
 class TrainerNuScenes:
     def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, resume_from_epoch=None, jsonfile='srncar.json', batch_size=2,
-                 n_rays=2048, num_workers=0, shuffle=False, check_iter=1000, save_iter=10000):
+                 n_rays=2048, num_workers=0, shuffle=False, check_iter=1000):
         """
         :param pretrained_model_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
@@ -36,7 +36,6 @@ class TrainerNuScenes:
         self.n_rays = n_rays
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
-        self.save_iter = save_iter
         self.make_savedir(save_dir)
         print('we are going to save at ', self.save_dir)
 
@@ -240,9 +239,6 @@ class TrainerNuScenes:
                     self.losses_occ = []
                     self.losses_reg = []
                     self.loss_total = torch.zeros(1).to(self.device)
-
-                    # if self.niter % self.save_iter == 0:
-                    #     self.save_models(self.niter)
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
