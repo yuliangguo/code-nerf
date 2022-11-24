@@ -29,7 +29,7 @@ if __name__ == '__main__':
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-trainval',
                             help="version number required to load nuscene ground-truth")
-    arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=6)
+    arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=10)
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1024)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
     arg_parser.add_argument("--epochs", dest="epochs", default=20)

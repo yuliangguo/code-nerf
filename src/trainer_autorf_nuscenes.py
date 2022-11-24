@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import json
 from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8
-from model import CodeNeRF
 from model_autorf import AutoRF
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -144,7 +143,7 @@ class TrainerAutoRFNuScenes:
                 viewdir = viewdir[:, :, [1, 0, 2]]
                 viewdir[:, :, 0] *= -1
 
-                # TODO: apply resizing for those ROI larger than a threshold
+                # apply resizing for those ROI larger than a threshold
                 tgt_img = self.preprocess_img(tgt_img)
                 shape_feat, texture_feat = self.model.encode_img(tgt_img.to(self.device))
                 sigmas, rgbs = self.model(xyz.to(self.device), viewdir.to(self.device), shape_feat, texture_feat)
