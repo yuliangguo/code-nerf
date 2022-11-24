@@ -720,14 +720,15 @@ if __name__ == '__main__':
     from torch.utils.data import DataLoader
     from nuimages import NuImages
 
-    nuim = NuImages(dataroot='/mnt/LinuxDataFast/Datasets/nuimages', version='v1.0-train', verbose=True, lazy=True)
+    # nuim = NuImages(dataroot='/mnt/LinuxDataFast/Datasets/nuimages', version='v1.0-train', verbose=True, lazy=True)
 
     nusc_dataset = NuScenesData(
         nusc_cat='vehicle.car',
         seg_cat='car',
-        nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-        nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_instance',
-        nusc_version='v1.0-mini',
+        nusc_data_dir='/media/yuliangguo/data_ssd_4tb/Datasets/nuscenes/v1.0-trainval',
+        nusc_seg_dir='/media/yuliangguo/data_ssd_4tb/Datasets/nuscenes/v1.0-trainval/pred_instance',
+        nusc_version='v1.0-trainval',
+        split='val',
         num_cams_per_sample=1,
         divisor=1000,
         box_iou_th=0.6,
@@ -737,14 +738,14 @@ if __name__ == '__main__':
         debug=True)
     dataloader = DataLoader(nusc_dataset, batch_size=1, num_workers=0, shuffle=True)
 
-    # Check the overlap of nuscenes and nuimages
-    for ii, anntoken in enumerate(nusc_dataset.anntokens):
-        sample_ann = nusc_dataset.nusc.get('sample_annotation', anntoken)
-        try:
-            sample_idx_check = nuim.getind('sample', sample_ann['sample_token'])
-            print('find an existence in nuimages')
-        except:
-            print('no match in nuimages')
+    # # Check the overlap of nuscenes and nuimages
+    # for ii, anntoken in enumerate(nusc_dataset.anntokens):
+    #     sample_ann = nusc_dataset.nusc.get('sample_annotation', anntoken)
+    #     try:
+    #         sample_idx_check = nuim.getind('sample', sample_ann['sample_token'])
+    #         print('find an existence in nuimages')
+    #     except:
+    #         print('no match in nuimages')
 
     # Analysis of valid portion of data
     valid_ann_total = 0

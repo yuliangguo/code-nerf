@@ -21,8 +21,8 @@ conda activate code_nerf
 
 - [x] Training
 - [x] Optimizing with GT pose
-- [ ] Editing Shapes/Textures
-- [ ] Pose Optimizing
+- [x] Editing Shapes/Textures
+- [x] Pose Optimizing
 
 
 ### Download the data (ShapeNet-SRN)
