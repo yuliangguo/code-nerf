@@ -126,3 +126,39 @@ def rot_dist(R1, R2):
     R_diff = torch.matmul(R1, torch.transpose(R2, -1, -2))
     trace = torch.tensor([torch.trace(R_diff_single) for R_diff_single in R_diff])
     return torch.acos((trace-1) / 2)
+
+
+def generate_obj_sz_reg_samples(obj_sz, obj_diag, shapenet_obj_cood=True, tau=0.05, samples_per_plane=100):
+    """
+        Generate samples around limit planes
+    """
+    norm_limits = obj_sz / obj_diag
+    if shapenet_obj_cood:
+        norm_limits = norm_limits[[1, 0, 2]]  # the limit does not care the sign
+    x_lim, y_lim, z_lim = norm_limits
+    out_samples = {}
+    X = np.random.uniform(-x_lim, x_lim, samples_per_plane)
+    Y = np.random.uniform(-y_lim, y_lim, samples_per_plane)
+    Z = np.random.uniform(-z_lim, z_lim, samples_per_plane)
+
+    out_samples['X_planes_out'] = np.concatenate([np.asarray([np.ones(samples_per_plane) * (-x_lim - tau), Y, Z]).transpose(),
+                                                np.asarray([np.ones(samples_per_plane) * (x_lim + tau), Y, Z]).transpose()],
+                                               axis=0).astype(np.float32)
+    out_samples['X_planes_in'] = np.concatenate([np.asarray([np.ones(samples_per_plane) * (-x_lim + tau), Y, Z]).transpose(),
+                                                np.asarray([np.ones(samples_per_plane) * (x_lim - tau), Y, Z]).transpose()],
+                                               axis=0).astype(np.float32)
+
+    out_samples['Y_planes_out'] = np.concatenate([np.asarray([X, np.ones(samples_per_plane) * (-y_lim - tau), Z]).transpose(),
+                                                np.asarray([X, np.ones(samples_per_plane) * (y_lim + tau), Z]).transpose()],
+                                               axis=0).astype(np.float32)
+    out_samples['Y_planes_in'] = np.concatenate([np.asarray([X, np.ones(samples_per_plane) * (-y_lim + tau), Z]).transpose(),
+                                                np.asarray([X, np.ones(samples_per_plane) * (y_lim - tau), Z]).transpose()],
+                                               axis=0).astype(np.float32)
+
+    out_samples['Z_planes_out'] = np.concatenate([np.asarray([X, Y, np.ones(samples_per_plane) * (-z_lim - tau)]).transpose(),
+                                                np.asarray([X, Y, np.ones(samples_per_plane) * (z_lim + tau)]).transpose()],
+                                               axis=0).astype(np.float32)
+    out_samples['Z_planes_in'] = np.concatenate([np.asarray([X, Y, np.ones(samples_per_plane) * (-z_lim + tau)]).transpose(),
+                                                np.asarray([X, Y, np.ones(samples_per_plane) * (z_lim - tau)]).transpose()],
+                                               axis=0).astype(np.float32)
+    return out_samples

@@ -14,10 +14,9 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
+    arg_parser.add_argument("--config_file", dest="config_file", default="nusc.vehicle.car.json")
     arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_10_06',
                             help="location of saved pretrained model and codes")
-    # arg_parser.add_argument("--model_dir", dest="model_dir", default='exps/srncar_08182022',
-    #                         help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
     arg_parser.add_argument("--seg_cat", dest="seg_cat", default='car',
@@ -31,11 +30,10 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truth")
     # arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=200)  # Early overfit for single image
+    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=50)  # Early overfit for single image
     arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
     arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=10000)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
-    arg_parser.add_argument("--jsonfile", dest="jsonfile", default="nusc.vehicle.car.json")
     arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
@@ -75,9 +73,14 @@ if __name__ == '__main__':
         max_t_pert=args.t_err,
     )
 
-    optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.jsonfile,
-                                  args.n_rays, args.num_opts, num_cams_per_sample=1,
-                                  num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
+    if 'autorf' in args.config_file:
+        optimizer = OptimizerAutoRFNuScenes(args.model_dir, args.gpu, nusc_dataset, args.config_file,
+                                            args.n_rays, args.num_opts, num_cams_per_sample=1,
+                                            num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
+    else:
+        optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.config_file,
+                                      args.n_rays, args.num_opts, num_cams_per_sample=1,
+                                      num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
 
     if args.opt_pose:
         if args.multi_ann_ops:
