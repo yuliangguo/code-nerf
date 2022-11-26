@@ -22,6 +22,13 @@ if __name__ == '__main__':
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--jsonfile", dest="jsonfile", default="srncar.json")
     arg_parser.add_argument("--batchsize", dest="batchsize", default=2048)
+    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True,
+                            help="if to optimize camera poses, if true the dataloader will generate erroneous poses")
+    arg_parser.add_argument("--max_rot_pert", dest="max_rot_pert", type=float, default=0.1,
+                            help="the max rotation perturbation applying to object pose")
+    arg_parser.add_argument("--max_t_pert", dest="max_t_pert", type=float, default=0.1,
+                            help="the max translation perturbation applying to object pose")
+    arg_parser.add_argument("--eval_photo", dest="eval_photo", action='store_true')
 
     args = arg_parser.parse_args()
     saved_dir = args.saved_dir
@@ -34,5 +41,12 @@ if __name__ == '__main__':
     num_opts = int(args.num_opts)
     for num, i in enumerate(tgt_instances):
         tgt_instances[num] = int(i)
-    optimizer = Optimizer(saved_dir, gpu, tgt_instances, args.splits, args.jsonfile, batchsize, num_opts)
-    optimizer.optimize_objs(tgt_instances, lr, lr_half_interval, save_img)
+
+    if not args.opt_pose:
+        optimizer = Optimizer(saved_dir, gpu, tgt_instances, args.splits, args.jsonfile, batchsize, num_opts)
+        optimizer.optimize_objs(tgt_instances, lr, lr_half_interval, save_img)
+    else:
+        save_postfix = f'_rpert{args.max_rot_pert}_tpert{args.max_t_pert}_nops{num_opts}_nview{len(tgt_instances)}'
+        optimizer = Optimizer(saved_dir, gpu, tgt_instances, args.splits, args.jsonfile, batchsize, num_opts,
+                              args.max_rot_pert, args.max_t_pert, save_postfix)
+        optimizer.optimize_objs_w_pose(tgt_instances, lr, lr_half_interval, save_img, eval_photo=args.eval_photo)

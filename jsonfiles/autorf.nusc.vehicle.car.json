@@ -22,8 +22,8 @@
   "check_points": 1100000,
   "optimize": {
     "num_opts": 32,
-    "lr_shape": 0.05,
-    "lr_texture": 0.02,
+    "lr_shape": 0.02,
+    "lr_texture": 0.05,
     "lr_pose": 0.02,
     "lr_half_interval": 1000
   }

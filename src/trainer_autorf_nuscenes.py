@@ -33,10 +33,6 @@ class TrainerAutoRFNuScenes:
         self.nusc_dataset = nusc_dataset
         self.dataloader = DataLoader(self.nusc_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         self.batch_size = batch_size
-        self.n_rays = self.hpams['n_rays']
-        self.n_samples = self.hpams['n_samples']
-        self.roi_margin = self.hpams['roi_margin']
-        self.max_img_sz = self.hpams['max_img_sz']
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
 
@@ -95,8 +91,8 @@ class TrainerAutoRFNuScenes:
                 obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
                 obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
                 H, W = imgs.shape[1:3]
-                rois[:, 0:2] -= self.roi_margin
-                rois[:, 2:4] += self.roi_margin
+                rois[:, 0:2] -= self.hpams['roi_margin']
+                rois[:, 2:4] += self.hpams['roi_margin']
                 rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
                 rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W-1))
                 rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H-1))
@@ -148,7 +144,7 @@ class TrainerAutoRFNuScenes:
                         far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
 
                         rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
-                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.n_samples)
+                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.hpams['n_samples'])
                         # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                         xyz /= obj_diag
                         xyz = xyz[:, :, [1, 0, 2]]
@@ -197,7 +193,7 @@ class TrainerAutoRFNuScenes:
         rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
 
         # For different sized roi, extract a random subset of pixels with fixed batch size
-        n_rays = np.minimum(rays_o.shape[0], self.n_rays)
+        n_rays = np.minimum(rays_o.shape[0], self.hpams['n_rays'])
         random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
         rays_o = rays_o[random_ray_ids]
         viewdir = viewdir[random_ray_ids]
@@ -208,7 +204,7 @@ class TrainerAutoRFNuScenes:
         mask_rgb = torch.clone(mask_occ)
         mask_rgb[mask_rgb < 0] = 0
 
-        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.n_samples)
+        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.hpams['n_samples'])
         xyz /= obj_diag
 
         # Apply symmetric augmentation
@@ -232,8 +228,8 @@ class TrainerAutoRFNuScenes:
     def preprocess_img(self, img):
         img = img.unsqueeze(0).permute((0, 3, 1, 2))
         _, _, im_h, im_w = img.shape
-        if np.maximum(im_h, im_w) > self.max_img_sz:
-            ratio = self.max_img_sz / np.maximum(im_h, im_w)
+        if np.maximum(im_h, im_w) > self.hpams['max_img_sz']:
+            ratio = self.hpams['max_img_sz'] / np.maximum(im_h, im_w)
             new_h = im_h * ratio
             new_w = im_w * ratio
             img = Resize((int(new_h), int(new_w)))(img)
