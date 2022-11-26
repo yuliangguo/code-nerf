@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import argparse
 # import json
-
+import torchvision
 # from torchvision import transforms
 import os
 
@@ -162,3 +162,28 @@ def generate_obj_sz_reg_samples(obj_sz, obj_diag, shapenet_obj_cood=True, tau=0.
                                                 np.asarray([X, Y, np.ones(samples_per_plane) * (z_lim - tau)]).transpose()],
                                                axis=0).astype(np.float32)
     return out_samples
+
+
+def align_imgs_width(imgs, W, max_view=4):
+    """
+        imgs: a list of tensors
+    """
+    out_imgs = []
+    if len(imgs) > max_view:
+        step = len(imgs) // max_view
+    else:
+        step = 1
+
+    for id in range(0, len(imgs), step):
+        img = imgs[id]
+        H_i, W_i = img.shape[:2]
+        H_out = int(float(H_i) * W / W_i)
+        # out_imgs.append(Image.fromarray(img.detach().cpu().numpy()).resize((W, H_out)))
+        img = img.reshape((1, H_i, W_i, -1))
+        img = img.permute((0, 3, 1, 2))
+        img = torchvision.transforms.Resize((H_out, W))(img)
+        img = img.permute((0, 2, 3, 1))
+        out_imgs.append(img.squeeze())
+        if len(out_imgs) == max_view:
+            break
+    return out_imgs

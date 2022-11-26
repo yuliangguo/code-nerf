@@ -5,9 +5,9 @@ import torchvision
 import torch
 import torch.nn as nn
 import json
-from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples
+from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width
 from skimage.metrics import structural_similarity as compute_ssim
-from model import CodeNeRF
+from model_codenerf import CodeNeRF
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import os
@@ -19,7 +19,6 @@ import pytorch3d.transforms.rotation_conversions as rot_trans
 
 class OptimizerNuScenes:
     def __init__(self, model_dir, gpu, nusc_dataset, jsonfile='srncar.json',
-                 n_rays=2048, num_opts=200, num_cams_per_sample=1,
                  save_postfix='_nuscenes', num_workers=0, shuffle=False):
         """
         :param model_dir: the directory of pre-trained model
@@ -43,8 +42,14 @@ class OptimizerNuScenes:
         self.nusc_dataset = nusc_dataset
         self.dataloader = DataLoader(self.nusc_dataset, batch_size=1, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         print('we are going to save at ', self.save_dir)
-        self.n_rays = n_rays
-        self.num_opts = num_opts
+        self.n_rays = self.hpams['n_rays']
+        self.n_samples = self.hpams['n_samples']
+        self.roi_margin = self.hpams['roi_margin']
+        self.num_opts = self.hpams['optimize']['num_opts']
+        self.lr_shape = self.hpams['optimize']['lr_shape']
+        self.lr_texture = self.hpams['optimize']['lr_texture']
+        self.lr_pose = self.hpams['optimize']['lr_pose']
+        self.lr_half_interval = self.hpams['optimize']['lr_half_interval']
 
         # initialize shapecode, texturecode, poses to optimize
         self.optimized_shapecodes = {}
@@ -69,18 +74,16 @@ class OptimizerNuScenes:
         self.R_eval = {}
         self.T_eval = {}
 
-    def optimize_objs(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True):
+    def optimize_objs(self, save_img=True, shapenet_obj_cood=True, sym_aug=True):
         """
             Optimize on each annotation frame independently
         """
 
-        self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
         # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
         cam_ids = [0]
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
             print(f'num obj: {batch_idx}/{len(self.dataloader)}')
-            # imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken = d
 
             imgs = batch_data['imgs']
             masks_occ = batch_data['masks_occ']
@@ -103,17 +106,17 @@ class OptimizerNuScenes:
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
             H, W = tgt_imgs.shape[1:3]
-            rois[:, 0:2] -= roi_margin
-            rois[:, 2:4] += roi_margin
+            rois[:, 0:2] -= self.roi_margin
+            rois[:, 2:4] += self.roi_margin
             rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
             rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
             rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
 
-            self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
             texturecode = self.optimized_texturecodes[instoken].to(self.device).detach().requires_grad_()
 
             # First Optimize
+            self.nopts = 0
             self.set_optimizers(shapecode, texturecode)
             # self.set_optimizers_w_model(shapecode, texturecode)
             while self.nopts < self.num_opts:
@@ -126,19 +129,19 @@ class OptimizerNuScenes:
                     tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[num], tgt_poses[num], masks_occ[num], rois[num], cam_intrinsics[num]
 
                     # render ray values and prepare target rays
-                    rgb_rays, depth_rays, acc_trans_rays, tgt_rays, mask_occ = self.render_rays(tgt_img, mask_occ,
-                                                                                                tgt_pose, obj_diag, K,
-                                                                                                roi, shapecode,
-                                                                                                texturecode,
-                                                                                                shapenet_obj_cood,
-                                                                                                sym_aug)
+                    rgb_rays, depth_rays, acc_trans_rays, tgt_rays, occ_pixels = self.render_rays(tgt_img, mask_occ,
+                                                                                                  tgt_pose, obj_diag, K,
+                                                                                                  roi, shapecode,
+                                                                                                  texturecode,
+                                                                                                  shapenet_obj_cood,
+                                                                                                  sym_aug)
 
                     # Compute losses
                     # loss_rgb = torch.sum((rgb_rays - tgt_pixels) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                    loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                    loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(occ_pixels)) / (torch.sum(torch.abs(occ_pixels))+1e-9)
                     # loss_occ = torch.sum(
-                    #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                    #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    #     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                    #                        torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
                     loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
@@ -166,7 +169,7 @@ class OptimizerNuScenes:
                             virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode, shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
-                if self.nopts % lr_half_interval == 0:
+                if self.nopts % self.lr_half_interval == 0:
                     self.set_optimizers(shapecode, texturecode)
                     # self.set_optimizers_w_model(shapecode, texturecode)
 
@@ -177,13 +180,10 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=False, euler_rot=False):
+    def optimize_objs_w_pose(self, save_img=True, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=False, euler_rot=False):
         """
             Optimize on each annotation frame independently
         """
-
-        self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
-        code_stop_nopts = lr_half_interval  # stop updating codes early to focus on pose updates
 
         # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
         cam_ids = [0]
@@ -214,13 +214,12 @@ class OptimizerNuScenes:
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
             H, W = tgt_imgs.shape[1:3]
-            rois[:, 0:2] -= roi_margin
-            rois[:, 2:4] += roi_margin
+            rois[:, 0:2] -= self.roi_margin
+            rois[:, 2:4] += self.roi_margin
             rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
             rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
             rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
 
-            self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
             texturecode = self.optimized_texturecodes[instoken].to(self.device).detach().requires_grad_()
 
@@ -232,6 +231,7 @@ class OptimizerNuScenes:
                 rot_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
 
             # First Optimize
+            self.nopts = 0
             self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec)
             # self.set_optimizers_w_poses_model(shapecode, texturecode, rot_vec, trans_vec)
             est_poses = torch.zeros((1, 3, 4), dtype=torch.float32)
@@ -252,7 +252,7 @@ class OptimizerNuScenes:
                 pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
 
                 # render ray values and prepare target rays
-                rgb_rays, depth_rays, acc_trans_rays, tgt_rays, mask_occ = self.render_rays(tgt_img, mask_occ,
+                rgb_rays, depth_rays, acc_trans_rays, tgt_rays, occ_pixels = self.render_rays(tgt_img, mask_occ,
                                                                                             pose2opt, obj_diag, K,
                                                                                             roi, shapecode,
                                                                                             texturecode,
@@ -262,11 +262,11 @@ class OptimizerNuScenes:
                 # Compute losses
                 # Critical to let rgb supervised on white background
                 # loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(occ_pixels)) / (torch.sum(torch.abs(occ_pixels))+1e-9)
                 # # Occupancy loss
                 # loss_occ = torch.sum(
-                #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
+                #     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                #                        torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                 # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
                 loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
@@ -330,7 +330,7 @@ class OptimizerNuScenes:
                                                                     shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
-                if self.nopts % lr_half_interval == 0:
+                if self.nopts % self.lr_half_interval == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec)
                     # self.set_optimizers_w_poses_model(shapecode, texturecode, rot_vec, trans_vec)
 
@@ -342,12 +342,11 @@ class OptimizerNuScenes:
             self.log_eval_pose(est_poses, tgt_poses, batch_data['anntoken'])
             self.save_opts_w_pose(batch_idx)
 
-    def optimize_objs_multi_anns(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True):
+    def optimize_objs_multi_anns(self, save_img=True, shapenet_obj_cood=True, sym_aug=True):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
 
-        self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
         instokens = self.nusc_dataset.ins_ann_tokens.keys()
 
         # Per object
@@ -360,21 +359,18 @@ class OptimizerNuScenes:
                 continue
 
             print(f'    num views: {tgt_imgs.shape[0]}')
-
-            rois[..., 0:2] -= roi_margin
-            rois[..., 2:4] += roi_margin
             H, W = tgt_imgs.shape[1:3]
-            rois[..., 0:2] -= roi_margin
-            rois[..., 2:4] += roi_margin
+            rois[..., 0:2] -= self.roi_margin
+            rois[..., 2:4] += self.roi_margin
             rois[..., 0:2] = torch.maximum(rois[..., 0:2], torch.as_tensor(0))
             rois[..., 2] = torch.minimum(rois[..., 2], torch.as_tensor(W - 1))
             rois[..., 3] = torch.minimum(rois[..., 3], torch.as_tensor(H - 1))
 
-            self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
             texturecode = self.optimized_texturecodes[instoken].to(self.device).detach().requires_grad_()
 
             # Optimize
+            self.nopts = 0
             self.set_optimizers(shapecode, texturecode)
             while self.nopts < self.num_opts:
                 self.opts.zero_grad()
@@ -389,7 +385,7 @@ class OptimizerNuScenes:
                     obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
                     # render ray values and prepare target rays
-                    rgb_rays, depth_rays, acc_trans_rays, tgt_rays, mask_occ = self.render_rays(tgt_img, mask_occ,
+                    rgb_rays, depth_rays, acc_trans_rays, tgt_rays, occ_pixels = self.render_rays(tgt_img, mask_occ,
                                                                                                 tgt_pose, obj_diag, K,
                                                                                                 roi, shapecode,
                                                                                                 texturecode,
@@ -398,11 +394,11 @@ class OptimizerNuScenes:
 
                     # Compute losses
                     # loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                    loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                    loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(occ_pixels)) / (torch.sum(torch.abs(occ_pixels))+1e-9)
                     # # Occupancy loss
                     # loss_occ = torch.sum(
-                    #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                    #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    #     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                    #                        torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
                     loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
@@ -437,7 +433,7 @@ class OptimizerNuScenes:
                             self.save_virtual_img(virtual_imgs, instoken, self.nopts)
 
                 self.nopts += 1
-                if self.nopts % lr_half_interval == 0:
+                if self.nopts % self.lr_half_interval == 0:
                     self.set_optimizers(shapecode, texturecode)
 
             # Save the optimized codes
@@ -446,16 +442,12 @@ class OptimizerNuScenes:
             self.optimized_ins_flag[instoken] = 1
             self.save_opts(obj_idx)
 
-    def optimize_objs_multi_anns_w_pose(self, lr=1e-2, lr_half_interval=10, save_img=True, roi_margin=5, shapenet_obj_cood=True, sym_aug=True, euler_rot=False):
+    def optimize_objs_multi_anns_w_pose(self, save_img=True, shapenet_obj_cood=True, sym_aug=True, euler_rot=False):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
 
-        self.lr, self.lr_half_interval, iters = lr, lr_half_interval, 0
-        code_stop_nopts = lr_half_interval  # stop updating codes early to focus on pose updates
         instokens = self.nusc_dataset.ins_ann_tokens.keys()
-        # instokens = np.unique(self.nusc_dataset.instokens)
-
         # Per object
         for obj_idx, instoken in enumerate(instokens):
             print(f'num obj: {obj_idx}/{len(instokens)}, instoken: {instoken}')
@@ -469,16 +461,13 @@ class OptimizerNuScenes:
             #     continue
 
             print(f'    num views: {tgt_imgs.shape[0]}')
-            rois[..., 0:2] -= roi_margin
-            rois[..., 2:4] += roi_margin
             H, W = tgt_imgs.shape[1:3]
-            rois[..., 0:2] -= roi_margin
-            rois[..., 2:4] += roi_margin
+            rois[..., 0:2] -= self.roi_margin
+            rois[..., 2:4] += self.roi_margin
             rois[..., 0:2] = torch.maximum(rois[..., 0:2], torch.as_tensor(0))
             rois[..., 2] = torch.minimum(rois[..., 2], torch.as_tensor(W - 1))
             rois[..., 3] = torch.minimum(rois[..., 3], torch.as_tensor(H - 1))
 
-            self.nopts, self.lr_half_interval = 0, lr_half_interval
             shapecode = self.optimized_shapecodes[instoken].to(self.device).detach().requires_grad_()
             texturecode = self.optimized_texturecodes[instoken].to(self.device).detach().requires_grad_()
 
@@ -490,6 +479,7 @@ class OptimizerNuScenes:
                 rot_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
 
             # Optimize
+            self.nopts = 0
             self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec)
             est_poses = torch.zeros((tgt_imgs.shape[0], 3, 4), dtype=torch.float32)
             while self.nopts < self.num_opts:
@@ -512,7 +502,7 @@ class OptimizerNuScenes:
                     obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
                     # render ray values and prepare target rays
-                    rgb_rays, depth_rays, acc_trans_rays, tgt_rays, mask_occ = self.render_rays(tgt_img, mask_occ,
+                    rgb_rays, depth_rays, acc_trans_rays, tgt_rays, occ_pixels = self.render_rays(tgt_img, mask_occ,
                                                                                                 pose2opt, obj_diag, K,
                                                                                                 roi, shapecode,
                                                                                                 texturecode,
@@ -521,11 +511,11 @@ class OptimizerNuScenes:
 
                     # Compute losses
                     # loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                    loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(mask_occ)) / (torch.sum(torch.abs(mask_occ))+1e-9)
+                    loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(occ_pixels)) / (torch.sum(torch.abs(occ_pixels))+1e-9)
                     # # Occupancy loss
                     # loss_occ = torch.sum(
-                    #     torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                    #                        torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    #     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                    #                        torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                     # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
                     loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
@@ -573,7 +563,7 @@ class OptimizerNuScenes:
                                                                     shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, instoken, self.nopts)
                 self.nopts += 1
-                if self.nopts % lr_half_interval == 0:
+                if self.nopts % self.lr_half_interval == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec)
 
             # Save the optimized codes
@@ -663,8 +653,7 @@ class OptimizerNuScenes:
         mask_rgb = torch.clone(mask_occ)
         mask_rgb[mask_rgb < 0] = 0
 
-        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                self.hpams['N_samples'])
+        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.n_samples)
         xyz /= obj_diag
 
         # Apply symmetric augmentation
@@ -693,8 +682,7 @@ class OptimizerNuScenes:
         far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
 
         rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
-        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                self.hpams['N_samples'])
+        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.n_samples)
         xyz /= obj_diag
         # Nuscene to ShapeNet: rotate 90 degree around Z
         if shapenet_obj_cood:
@@ -778,30 +766,6 @@ class OptimizerNuScenes:
 
         return virtual_imgs
 
-    def align_imgs_width(self, imgs, W, max_view=4):
-        """
-            imgs: a list of tensors
-        """
-        out_imgs = []
-        if len(imgs) > max_view:
-            step = len(imgs) // max_view
-        else:
-            step = 1
-
-        for id in range(0, len(imgs), step):
-            img = imgs[id]
-            H_i, W_i = img.shape[:2]
-            H_out = int(float(H_i) * W / W_i)
-            # out_imgs.append(Image.fromarray(img.detach().cpu().numpy()).resize((W, H_out)))
-            img = img.reshape((1, H_i, W_i, -1))
-            img = img.permute((0, 3, 1, 2))
-            img = torchvision.transforms.Resize((H_out, W))(img)
-            img = img.permute((0, 2, 3, 1))
-            out_imgs.append(img.squeeze())
-            if len(out_imgs) == max_view:
-                break
-        return out_imgs
-
     def save_img(self, generated_imgs, gt_imgs, masks_occ, obj_id, instance_num):
         # H, W = gt_imgs[0].shape[:2]
         W_tgt = np.min([gt_img.shape[1] for gt_img in gt_imgs])
@@ -809,9 +773,9 @@ class OptimizerNuScenes:
 
         if len(gt_imgs) > 1:
             # Align the width of different-sized images
-            generated_imgs = self.align_imgs_width(generated_imgs, W_tgt)
-            masks_occ = self.align_imgs_width(masks_occ, W_tgt)
-            gt_imgs = self.align_imgs_width(gt_imgs, W_tgt)
+            generated_imgs = align_imgs_width(generated_imgs, W_tgt)
+            masks_occ = align_imgs_width(masks_occ, W_tgt)
+            gt_imgs = align_imgs_width(gt_imgs, W_tgt)
 
         generated_imgs = torch.cat(generated_imgs).reshape(-1, W_tgt, 3)
         masks_occ = torch.cat(masks_occ).reshape(-1, W_tgt, 1)
@@ -897,48 +861,46 @@ class OptimizerNuScenes:
         return err_R, err_T
 
     def set_optimizers(self, shapecode, texturecode):
-        lr = self.get_learning_rate()
-        #print(lr)
+        self.update_learning_rate()
         self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr}
+            {'params': shapecode, 'lr': self.lr_shape},
+            {'params': texturecode, 'lr': self.lr_texture}
         ])
 
     def set_optimizers_w_model(self, shapecode, texturecode):
-        # lr1, lr2 = self.get_learning_rate()
-        lr1 = 1e-4
-        lr2 = 1e-4
+        self.update_learning_rate()
+        lr = 1e-4
         self.opts = torch.optim.AdamW([
-            {'params': self.model.parameters(), 'lr': lr1},
-            {'params': shapecode, 'lr': lr2},
-            {'params': texturecode, 'lr': lr2}
+            {'params': self.model.parameters(), 'lr': lr},
+            {'params': shapecode, 'lr': self.lr_shape},
+            {'params': texturecode, 'lr': self.lr_texture}
         ])
 
     def set_optimizers_w_poses(self, shapecode, texturecode, rots, trans):
-        lr = self.get_learning_rate()
+        self.update_learning_rate()
         self.opts = torch.optim.AdamW([
-            {'params': shapecode, 'lr': lr},
-            {'params': texturecode, 'lr': lr},
-            {'params': rots, 'lr': lr},
-            {'params': trans, 'lr':  lr}
+            {'params': shapecode, 'lr': self.lr_shape},
+            {'params': texturecode, 'lr': self.lr_texture},
+            {'params': rots, 'lr': self.lr_pose},
+            {'params': trans, 'lr':  self.lr_pose}
         ])
 
     def set_optimizers_w_poses_model(self, shapecode, texturecode, rots, trans):
-        # lr = self.get_learning_rate()
-        lr1 = 1e-4
-        lr2 = 1e-4
+        self.update_learning_rate()
+        lr = 1e-4
         self.opts = torch.optim.AdamW([
-            {'params': self.model.parameters(), 'lr': lr1},
-            {'params': shapecode, 'lr': lr2},
-            {'params': texturecode, 'lr': lr2},
-            {'params': rots, 'lr': lr2},
-            {'params': trans, 'lr':  lr2}
+            {'params': self.model.parameters(), 'lr': lr},
+            {'params': shapecode, 'lr': self.lr_shape},
+            {'params': texturecode, 'lr': self.lr_texture},
+            {'params': rots, 'lr': self.lr_pose},
+            {'params': trans, 'lr':  self.lr_pose}
         ])
 
-    def get_learning_rate(self):
+    def update_learning_rate(self):
         opt_values = self.nopts // self.lr_half_interval
-        lr = self.lr * 2**(-opt_values)
-        return lr
+        self.lr_shape = self.lr_shape * 2**(-opt_values)
+        self.lr_texture = self.lr_texture * 2**(-opt_values)
+        self.lr_pose = self.lr_pose * 2**(-opt_values)
 
     def make_model(self):
         self.model = CodeNeRF(**self.hpams['net_hyperparams']).to(self.device)

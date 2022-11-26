@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(ROOT_DIR))
 
 import argparse
 from src.utils import str2bool
-from src.optimizer import Optimizer
+from src.optimizer_srn import Optimizer
 
 
 if __name__ == '__main__':

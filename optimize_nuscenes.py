@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(ROOT_DIR))
 import argparse
 
 from src.utils import str2bool
-from src.optimizer_nuscenes import OptimizerNuScenes
+from src.optimizer_codenerf_nuscenes import OptimizerNuScenes
 from src.optimizer_autorf_nuscenes import OptimizerAutoRFNuScenes
 from src.data_nuscenes import NuScenesData
 
@@ -14,8 +14,8 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--config_file", dest="config_file", default="nusc.vehicle.car.json")
-    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_10_06',
+    arg_parser.add_argument("--config_file", dest="config_file", default="autorf.nusc.vehicle.car.json")
+    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_11_23',
                             help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
@@ -24,17 +24,12 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_data_dir", dest="nusc_data_dir",
                             default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                             help="nuscenes dataset dir")
+    arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
+                            help="version number required to load nuscene ground-truth")
     arg_parser.add_argument("--seg_source", dest="seg_source",
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
-    arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
-                            help="version number required to load nuscene ground-truth")
-    # arg_parser.add_argument("--num_cams_per_sample", dest="num_cams_per_sample", type=int, default=1)
-    arg_parser.add_argument("--num_opts", dest="num_opts", type=int, default=50)  # Early overfit for single image
-    arg_parser.add_argument("--lr", dest="lr", type=float, default=1e-2)
-    arg_parser.add_argument("--lr_half_interval", dest="lr_half_interval", type=int, default=10000)
     arg_parser.add_argument("--save_img", dest="save_img", default=True)
-    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1600)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
                             help="if to optimize multiple annotations of the same instance jointly")
@@ -75,20 +70,18 @@ if __name__ == '__main__':
 
     if 'autorf' in args.config_file:
         optimizer = OptimizerAutoRFNuScenes(args.model_dir, args.gpu, nusc_dataset, args.config_file,
-                                            args.n_rays, args.num_opts, num_cams_per_sample=1,
                                             num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
     else:
         optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.config_file,
-                                      args.n_rays, args.num_opts, num_cams_per_sample=1,
                                       num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
 
     if args.opt_pose:
         if args.multi_ann_ops:
-            optimizer.optimize_objs_multi_anns_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
+            optimizer.optimize_objs_multi_anns_w_pose(str2bool(args.save_img))
         else:
-            optimizer.optimize_objs_w_pose(args.lr, args.lr_half_interval, str2bool(args.save_img))
+            optimizer.optimize_objs_w_pose(str2bool(args.save_img))
     else:
         if args.multi_ann_ops:
-            optimizer.optimize_objs_multi_anns(args.lr, args.lr_half_interval, str2bool(args.save_img))
+            optimizer.optimize_objs_multi_anns(str2bool(args.save_img))
         else:
-            optimizer.optimize_objs(args.lr, args.lr_half_interval, str2bool(args.save_img))
+            optimizer.optimize_objs(str2bool(args.save_img))

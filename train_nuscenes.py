@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(ROOT_DIR))
 import argparse
 from datetime import date
 
-from src.trainer_nuscenes import TrainerNuScenes
+from src.trainer_codenerf_nuscenes import TrainerNuScenes
 from src.trainer_autorf_nuscenes import TrainerAutoRFNuScenes
 from src.data_nuscenes import NuScenesData
 
@@ -30,7 +30,6 @@ if __name__ == '__main__':
     arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-trainval',
                             help="version number required to load nuscene ground-truth")
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=10)
-    arg_parser.add_argument("--n_rays", dest="n_rays", type=int, default=1024)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
     arg_parser.add_argument("--epochs", dest="epochs", default=20)
     arg_parser.add_argument("--resume_from_epoch", dest="resume_from_epoch", default=None)
@@ -60,9 +59,9 @@ if __name__ == '__main__':
     if 'autorf' in args.config_file:
         trainer = TrainerAutoRFNuScenes(save_dir, args.gpu, nusc_dataset,
                                         args.pretrained_model_dir, args.resume_from_epoch, args.config_file,
-                                        args.batch_size, args.n_rays, num_workers=args.num_workers, shuffle=True)
+                                        args.batch_size, num_workers=args.num_workers, shuffle=True)
     else:
         trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
                                   args.pretrained_model_dir, args.resume_from_epoch, args.config_file, args.batch_size,
-                                  args.n_rays, num_workers=args.num_workers, shuffle=True)
+                                  num_workers=args.num_workers, shuffle=True)
     trainer.training(args.epochs)

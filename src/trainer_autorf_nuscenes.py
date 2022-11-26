@@ -18,7 +18,7 @@ import math
 
 class TrainerAutoRFNuScenes:
     def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, resume_from_epoch=None, jsonfile='srncar.json', batch_size=2,
-                 n_rays=2048, num_workers=0, shuffle=False, check_iter=1000, max_img_sz=320):
+                 num_workers=0, shuffle=False, check_iter=1000):
         """
         :param pretrained_model_dir: the directory of pre-trained model
         :param gpu: which GPU we would use
@@ -33,10 +33,12 @@ class TrainerAutoRFNuScenes:
         self.nusc_dataset = nusc_dataset
         self.dataloader = DataLoader(self.nusc_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, pin_memory=True)
         self.batch_size = batch_size
-        self.n_rays = n_rays
+        self.n_rays = self.hpams['n_rays']
+        self.n_samples = self.hpams['n_samples']
+        self.roi_margin = self.hpams['roi_margin']
+        self.max_img_sz = self.hpams['max_img_sz']
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
-        self.max_img_sz = max_img_sz
 
         self.make_savedir(save_dir)
         print('we are going to save at ', self.save_dir)
@@ -67,7 +69,7 @@ class TrainerAutoRFNuScenes:
             self.save_models(epoch=self.nepoch)
             self.nepoch += 1
 
-    def training_single_epoch(self, roi_margin=5, sym_aug=False):
+    def training_single_epoch(self, sym_aug=False):
         """
             Optimize on each annotation frame independently
         """
@@ -93,8 +95,8 @@ class TrainerAutoRFNuScenes:
                 obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
                 obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
                 H, W = imgs.shape[1:3]
-                rois[:, 0:2] -= roi_margin
-                rois[:, 2:4] += roi_margin
+                rois[:, 0:2] -= self.roi_margin
+                rois[:, 2:4] += self.roi_margin
                 rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
                 rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W-1))
                 rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H-1))
@@ -102,59 +104,32 @@ class TrainerAutoRFNuScenes:
                 tgt_img, tgt_pose, mask_occ, roi, K = \
                     imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
 
-                # near and far sample range need to be adaptively calculated
-                near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
-                far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
-
-                rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
-
-                # For different sized roi, extract a random subset of pixels with fixed batch size
-                n_rays = np.minimum(rays_o.shape[0], self.n_rays)
-                random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
-                rays_o = rays_o[random_ray_ids]
-                viewdir = viewdir[random_ray_ids]
-
-                # The random selection should be within the roi pixels
+                # crop tgt img to roi
                 tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]]
                 mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
-
                 # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                 tgt_img = tgt_img * (mask_occ > 0)
                 tgt_img = tgt_img + (mask_occ < 0)
 
-                # extract samples
-                tgt_pixels = tgt_img.reshape(-1, 3)[random_ray_ids].to(self.device)
-                mask_occ = mask_occ.reshape(-1, 1)[random_ray_ids].to(self.device)
-                mask_rgb = torch.clone(mask_occ)
-                mask_rgb[mask_rgb < 0] = 0
+                # preprocess image and predict shapecode and texturecode
+                img_in = self.preprocess_img(tgt_img)
+                shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
 
-                xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                        self.hpams['N_samples'])
-                xyz /= obj_diag  # normalize to (-1 1)
+                # render ray values and prepare target rays
+                rgb_rays, depth_rays, acc_trans_rays, tgt_rays, occ_pixels = self.render_rays(tgt_img, mask_occ,
+                                                                                            tgt_pose, obj_diag, K,
+                                                                                            roi, shapecode,
+                                                                                            texturecode,
+                                                                                            shapenet_obj_cood=True,
+                                                                                            sym_aug=sym_aug)
 
-                # Apply symmetric augmentation
-                if sym_aug and random.uniform(0, 1) > 0.5:
-                    xyz[:, :, 1] *= (-1)
-                    viewdir[:, :, 1] *= (-1)
-
-                # Nuscene to ShapeNet: rotate 90 degree around Z
-                xyz = xyz[:, :, [1, 0, 2]]
-                xyz[:, :, 0] *= (-1)
-                viewdir = viewdir[:, :, [1, 0, 2]]
-                viewdir[:, :, 0] *= -1
-
-                # apply resizing for those ROI larger than a threshold
-                tgt_img = self.preprocess_img(tgt_img)
-                shape_feat, texture_feat = self.model.encode_img(tgt_img.to(self.device))
-                sigmas, rgbs = self.model(xyz.to(self.device), viewdir.to(self.device), shape_feat, texture_feat)
-                rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
                 # loss_rgb = torch.sum((rgb_rays - tgt_pixels) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                loss_rgb = torch.sum((rgb_rays - tgt_pixels) ** 2 * torch.abs(mask_occ)) / (
-                            torch.sum(torch.abs(mask_occ)) + 1e-9)
+                loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(occ_pixels)) / (
+                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 # Occupancy loss
                 loss_occ = torch.sum(
-                    torch.exp(-mask_occ * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(mask_occ)) / (
-                                   torch.sum(torch.abs(mask_occ)) + 1e-9)
+                    torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                                   torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
                 # self.loss_total += (loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
                 self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
@@ -173,8 +148,7 @@ class TrainerAutoRFNuScenes:
                         far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
 
                         rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
-                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far,
-                                                                self.hpams['N_samples'])
+                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.n_samples)
                         # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
                         xyz /= obj_diag
                         xyz = xyz[:, :, [1, 0, 2]]
@@ -187,8 +161,8 @@ class TrainerAutoRFNuScenes:
                         for i in range(0, xyz.shape[0], sample_step):
                             sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
                                                       viewdir[i:i + sample_step].to(self.device),
-                                                      shape_feat,
-                                                      texture_feat)
+                                                      shapecode,
+                                                      texturecode)
                             rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
                             generated_img.append(rgb_rays)
                         generated_img = torch.cat(generated_img).reshape(roi[3] - roi[1], roi[2] - roi[0], 3)
@@ -214,6 +188,46 @@ class TrainerAutoRFNuScenes:
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
+
+    def render_rays(self, img, mask_occ, cam_pose, obj_diag, K, roi, shapecode, texturecode, shapenet_obj_cood, sym_aug):
+        # near and far sample range need to be adaptively calculated
+        near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
+        far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
+
+        rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
+
+        # For different sized roi, extract a random subset of pixels with fixed batch size
+        n_rays = np.minimum(rays_o.shape[0], self.n_rays)
+        random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
+        rays_o = rays_o[random_ray_ids]
+        viewdir = viewdir[random_ray_ids]
+
+        # extract samples
+        tgt_pixels = img.reshape(-1, 3)[random_ray_ids].to(self.device)
+        mask_occ = mask_occ.reshape(-1, 1)[random_ray_ids].to(self.device)
+        mask_rgb = torch.clone(mask_occ)
+        mask_rgb[mask_rgb < 0] = 0
+
+        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.n_samples)
+        xyz /= obj_diag
+
+        # Apply symmetric augmentation
+        if sym_aug and random.uniform(0, 1) > 0.5:
+            xyz[:, :, 1] *= (-1)
+            viewdir[:, :, 1] *= (-1)
+
+        # Nuscene to ShapeNet: frame rotate -90 degree around Z, coord rotate 90 degree around Z
+        if shapenet_obj_cood:
+            xyz = xyz[:, :, [1, 0, 2]]
+            xyz[:, :, 0] *= (-1)
+            viewdir = viewdir[:, :, [1, 0, 2]]
+            viewdir[:, :, 0] *= (-1)
+
+        sigmas, rgbs = self.model(xyz.to(self.device),
+                                  viewdir.to(self.device),
+                                  shapecode, texturecode)
+        rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
+        return rgb_rays, depth_rays, acc_trans_rays, tgt_pixels, mask_occ
 
     def preprocess_img(self, img):
         img = img.unsqueeze(0).permute((0, 3, 1, 2))

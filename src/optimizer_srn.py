@@ -4,10 +4,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import json
-from data import SRN
+from data_srn import SRN
 from utils import get_rays, sample_from_rays, volume_rendering, image_float_to_uint8, rot_dist
 from skimage.metrics import structural_similarity as compute_ssim
-from model import CodeNeRF
+from model_codenerf import CodeNeRF
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import os

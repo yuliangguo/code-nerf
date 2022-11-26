@@ -1,4 +1,5 @@
 {
+  "arch": "codenerf",
   "net_hyperparams": {
     "shape_blocks": 3,
     "texture_blocks": 1,
@@ -7,7 +8,9 @@
     "num_dir_freq": 4,
     "latent_dim": 256
   },
-  "N_samples": 64,
+  "n_rays": 1024,
+  "n_samples": 64,
+  "roi_margin": 5,
   "loss_reg_coef": 1e-3,
   "loss_occ_coef": 1e-1,
   "loss_sym_coef": 1.0,
@@ -16,5 +19,12 @@
     {"type":  "step", "lr":  1e-4, "interval":  250000},
     {"type":  "step", "lr":  1e-4, "interval":  250000}
   ],
-  "check_points": 1100000
+  "check_points": 1100000,
+  "optimize": {
+    "num_opts": 100,
+    "lr_shape": 0.02,
+    "lr_texture": 0.05,
+    "lr_pose": 0.02,
+    "lr_half_interval": 1000
+  }
 }

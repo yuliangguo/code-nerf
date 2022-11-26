@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(ROOT_DIR))
 
 import argparse
 
-from src.trainer import Trainer
+from src.trainer_srn import Trainer
 
 
 if __name__ == '__main__':
