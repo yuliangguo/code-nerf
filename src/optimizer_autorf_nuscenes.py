@@ -1,11 +1,10 @@
 import random
-
 import numpy as np
 import torchvision
 import torch
 import torch.nn as nn
 import json
-from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width
+from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width, render_rays, render_full_img, render_virtual_imgs
 from skimage.metrics import structural_similarity as compute_ssim
 from model_autorf import AutoRF
 from torch.utils.data import DataLoader
@@ -66,8 +65,7 @@ class OptimizerAutoRFNuScenes:
         self.R_eval = {}
         self.T_eval = {}
 
-    def optimize_objs(self, save_img=True, shapenet_obj_cood=True,
-                      sym_aug=True):
+    def optimize_objs(self, save_img=True, shapenet_obj_cood=True, sym_aug=True):
         """
             Optimize on each annotation frame independently
         """
@@ -132,12 +130,13 @@ class OptimizerAutoRFNuScenes:
                 loss_per_img = []
 
                 # render ray values and prepare target rays
-                rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = self.render_rays(tgt_img, mask_occ,
-                                                                                             tgt_pose, obj_diag, K,
-                                                                                             roi, shapecode,
-                                                                                             texturecode,
-                                                                                             shapenet_obj_cood,
-                                                                                             sym_aug)
+                rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
+                                                                                        tgt_img, mask_occ, tgt_pose,
+                                                                                        obj_diag, K, roi,
+                                                                                        self.hpams['n_rays'],
+                                                                                        self.hpams['n_samples'],
+                                                                                        shapecode, texturecode,
+                                                                                        shapenet_obj_cood, sym_aug)
 
                 # Compute losses
                 # loss_rgb = torch.sum((rgb_rays - tgt_pixels) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
@@ -165,14 +164,16 @@ class OptimizerAutoRFNuScenes:
                         # for num, cam_id in enumerate(cam_ids):
                         tgt_pose, roi, K = tgt_poses[0], rois[0], cam_intrinsics[0]
                         # render full image
-                        generated_img = self.render_full_img(tgt_pose, obj_sz, K, roi, shapecode, texturecode,
-                                                             shapenet_obj_cood)
+                        generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
+                                                        self.hpams['n_samples'], shapecode, texturecode,
+                                                        shapenet_obj_cood)
                         generated_imgs.append(generated_img)
                         self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
                         # save virtual views at the beginning and the end
                         if self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
-                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
-                                                                    shapenet_obj_cood)
+                            virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
+                                                               self.hpams['n_samples'], shapecode, texturecode,
+                                                               shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % self.hpams['optimize']['lr_half_interval'] == 0:
@@ -269,16 +270,16 @@ class OptimizerAutoRFNuScenes:
                 pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
 
                 # render ray values and prepare target rays
-                rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = self.render_rays(tgt_img, mask_occ,
-                                                                                             pose2opt, obj_diag, K,
-                                                                                             roi, shapecode,
-                                                                                             texturecode,
-                                                                                             shapenet_obj_cood,
-                                                                                             sym_aug)
-
+                rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
+                                                                                        tgt_img, mask_occ, pose2opt,
+                                                                                        obj_diag, K, roi,
+                                                                                        self.hpams['n_rays'],
+                                                                                        self.hpams['n_samples'],
+                                                                                        shapecode, texturecode,
+                                                                                        shapenet_obj_cood, sym_aug)
                 # Compute losses
                 # Critical to let rgb supervised on white background
-                # loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                 loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
                             torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 # Occupancy loss
@@ -318,8 +319,9 @@ class OptimizerAutoRFNuScenes:
                         tgt_pose, roi, K = tgt_poses[0], rois[0], cam_intrinsics[0]
                         pose2opt = est_poses[0]
                         # render full image
-                        generated_img = self.render_full_img(pose2opt, obj_sz, K, roi, shapecode, texturecode,
-                                                             shapenet_obj_cood, debug_occ=False)
+                        generated_img = render_full_img(self.model, self.device, pose2opt, obj_sz, K, roi,
+                                                        self.hpams['n_samples'], shapecode, texturecode,
+                                                        shapenet_obj_cood)
                         # mark pose error on the image
                         err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[0], errs_T[0])
                         generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
@@ -329,8 +331,9 @@ class OptimizerAutoRFNuScenes:
 
                         # save virtual views at the beginning and the end
                         if self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
-                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
-                                                                    shapenet_obj_cood)
+                            virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
+                                                               self.hpams['n_samples'], shapecode, texturecode,
+                                                               shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % self.hpams['optimize']['lr_half_interval'] == 0:
@@ -414,15 +417,15 @@ class OptimizerAutoRFNuScenes:
                     tgt_img = tgt_img + (mask_occ < 0)
 
                     # render ray values and prepare target rays
-                    rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = self.render_rays(tgt_img, mask_occ,
-                                                                                                 tgt_pose, obj_diag, K,
-                                                                                                 roi, shapecode,
-                                                                                                 texturecode,
-                                                                                                 shapenet_obj_cood,
-                                                                                                 sym_aug)
-
+                    rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
+                                                                                            tgt_img, mask_occ, tgt_pose,
+                                                                                            obj_diag, K, roi,
+                                                                                            self.hpams['n_rays'],
+                                                                                            self.hpams['n_samples'],
+                                                                                            shapecode, texturecode,
+                                                                                            shapenet_obj_cood, sym_aug)
                     # Compute losses
-                    # loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                    # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
                                 torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     # Occupancy loss
@@ -452,16 +455,18 @@ class OptimizerAutoRFNuScenes:
                             tgt_pose, roi, K = tgt_poses[num], rois[num], cam_intrinsics[num]
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
                             # render full image
-                            generated_img = self.render_full_img(tgt_pose, obj_sz, K, roi, shapecode, texturecode,
-                                                                 shapenet_obj_cood)
+                            generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
+                                                            self.hpams['n_samples'], shapecode, texturecode,
+                                                            shapenet_obj_cood)
                             generated_imgs.append(generated_img)
                         self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
 
                         # save virtual views at the beginning and the end
                         if self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[0])['size']
-                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
-                                                                    shapenet_obj_cood)
+                            virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
+                                                               self.hpams['n_samples'], shapecode, texturecode,
+                                                               shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, instoken, self.nopts)
 
                 self.nopts += 1
@@ -562,16 +567,16 @@ class OptimizerAutoRFNuScenes:
                     tgt_img = tgt_img + (mask_occ < 0)
 
                     # render ray values and prepare target rays
-                    rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = self.render_rays(tgt_img, mask_occ,
-                                                                                                 pose2opt, obj_diag, K,
-                                                                                                 roi,
-                                                                                                 shapecode,
-                                                                                                 texturecode,
-                                                                                                 shapenet_obj_cood,
-                                                                                                 sym_aug)
+                    rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
+                                                                                            tgt_img, mask_occ, pose2opt,
+                                                                                            obj_diag, K, roi,
+                                                                                            self.hpams['n_rays'],
+                                                                                            self.hpams['n_samples'],
+                                                                                            shapecode, texturecode,
+                                                                                            shapenet_obj_cood, sym_aug)
 
                     # Compute losses
-                    # loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                    # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
                                 torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     # Occupancy loss
@@ -608,8 +613,9 @@ class OptimizerAutoRFNuScenes:
                             pose2opt = est_poses[num]
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[num])['size']
                             # render full image
-                            generated_img = self.render_full_img(pose2opt, obj_sz, K, roi, shapecode, texturecode,
-                                                                 shapenet_obj_cood)
+                            generated_img = render_full_img(self.model, self.device, pose2opt, obj_sz, K, roi,
+                                                            self.hpams['n_samples'], shapecode, texturecode,
+                                                            shapenet_obj_cood)
                             # mark pose error on the image
                             err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[num], errs_T[num])
                             generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
@@ -623,8 +629,9 @@ class OptimizerAutoRFNuScenes:
                         # save virtual views at the beginning and the end
                         if self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[0])['size']
-                            virtual_imgs = self.render_virtual_imgs(obj_sz, cam_intrinsics[0], shapecode, texturecode,
-                                                                    shapenet_obj_cood)
+                            virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
+                                                               self.hpams['n_samples'], shapecode, texturecode,
+                                                               shapenet_obj_cood)
                             self.save_virtual_img(virtual_imgs, instoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % self.hpams['optimize']['lr_half_interval'] == 0:
@@ -699,146 +706,6 @@ class OptimizerAutoRFNuScenes:
             new_w = im_w * ratio
             img = Resize((int(new_h), int(new_w)))(img)
         return img
-
-    def render_rays(self, img, mask_occ, cam_pose, obj_diag, K, roi, shapecode, texturecode, shapenet_obj_cood, sym_aug):
-        # near and far sample range need to be adaptively calculated
-        near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
-        far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
-
-        rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
-
-        # For different sized roi, extract a random subset of pixels with fixed batch size
-        n_rays = np.minimum(rays_o.shape[0], self.hpams['n_rays'])
-        random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
-        rays_o = rays_o[random_ray_ids]
-        viewdir = viewdir[random_ray_ids]
-
-        # # The random selection should be within the roi pixels
-        # img = img[roi[1]: roi[3], roi[0]: roi[2]]
-        # mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
-        #
-        # # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
-        # img = img * (mask_occ > 0)
-        # img = img + (mask_occ < 0)
-
-        # extract samples
-        rgb_tgt = img.reshape(-1, 3)[random_ray_ids].to(self.device)
-        occ_pixels = mask_occ.reshape(-1, 1)[random_ray_ids].to(self.device)
-        mask_rgb = torch.clone(mask_occ)
-        mask_rgb[mask_rgb < 0] = 0
-
-        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.hpams['n_samples'])
-        xyz /= obj_diag
-
-        # Apply symmetric augmentation
-        if sym_aug and random.uniform(0, 1) > 0.5:
-            xyz[:, :, 1] *= (-1)
-            viewdir[:, :, 1] *= (-1)
-
-        # Nuscene to ShapeNet: frame rotate -90 degree around Z, coord rotate 90 degree around Z
-        if shapenet_obj_cood:
-            xyz = xyz[:, :, [1, 0, 2]]
-            xyz[:, :, 0] *= (-1)
-            viewdir = viewdir[:, :, [1, 0, 2]]
-            viewdir[:, :, 0] *= (-1)
-
-        sigmas, rgbs = self.model(xyz.to(self.device),
-                                  viewdir.to(self.device),
-                                  shapecode, texturecode)
-        rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
-        return rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels
-
-    def render_full_img(self, cam_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood, debug_occ=False):
-        obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-
-        # near and far sample range need to be adaptively calculated
-        near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
-        far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
-
-        rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
-        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.hpams['n_samples'])
-        xyz /= obj_diag
-        # Nuscene to ShapeNet: rotate 90 degree around Z
-        if shapenet_obj_cood:
-            xyz = xyz[:, :, [1, 0, 2]]
-            xyz[:, :, 0] *= (-1)
-            viewdir = viewdir[:, :, [1, 0, 2]]
-            viewdir[:, :, 0] *= (-1)
-
-        generated_img = []
-        generated_acc_trans = []
-        sample_step = np.maximum(roi[2] - roi[0], roi[3] - roi[1])
-        for i in range(0, xyz.shape[0], sample_step):
-            sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                      viewdir[i:i + sample_step].to(self.device),
-                                      shapecode, texturecode)
-            if debug_occ:
-                rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
-                generated_acc_trans.append(acc_trans_rays)
-            else:
-                rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-            generated_img.append(rgb_rays)
-        generated_img = torch.cat(generated_img).reshape(roi[3] - roi[1], roi[2] - roi[0], 3)
-
-        if debug_occ:
-            generated_acc_trans = torch.cat(generated_acc_trans).reshape(roi[3]-roi[1], roi[2]-roi[0])
-            cv2.imshow('est_occ', ((torch.ones_like(generated_acc_trans) - generated_acc_trans).cpu().numpy() * 255).astype(np.uint8))
-            # cv2.imshow('mask_occ', ((gt_masks_occ[0].cpu().numpy() + 1) * 0.5 * 255).astype(np.uint8))
-            cv2.waitKey()
-
-        return generated_img
-
-    def render_virtual_imgs(self, obj_sz, K, shapecode, texturecode, shapenet_obj_cood, radius=40., tilt=np.pi/6, pan_num=8, img_sz=128):
-        virtual_imgs = []
-        x_min = K[0, 2] - img_sz/2
-        x_max = K[0, 2] + img_sz/2
-        y_min = K[1, 2] - img_sz/2
-        y_max = K[1, 2] + img_sz/2
-        roi = np.asarray([x_min, y_min, x_max, y_max]).astype(np.int)
-        # sample camera with fixed radius, tilt, and pan angles spanning 2 pi
-        cam_init = np.asarray([[0,   0,  1, -radius],
-                               [-1,  0,  0, 0],
-                               [0,  -1,  0, 0],
-                               [0,   0,  0, 1]]).astype(np.float32)
-        cam_tilt = np.asarray([[np.cos(tilt),   0, np.sin(tilt), 0],
-                               [0,              1, 0,             0],
-                               [-np.sin(tilt),   0, np.cos(tilt),  0],
-                               [0,              0, 0,             1]]).astype(np.float32) @ cam_init
-
-        pan_angles = np.linspace(0, 2*np.pi, pan_num, endpoint=False)
-        for pan in pan_angles:
-            cam_pose = np.asarray([[np.cos(pan),   -np.sin(pan), 0, 0],
-                                   [np.sin(pan),   np.cos(pan),  0, 0],
-                                   [0,              0,           1, 0],
-                                   [0,              0,           0, 1]]).astype(np.float32) @ cam_tilt
-            cam_pose = torch.from_numpy(cam_pose[:3, :])
-            generated_img = self.render_full_img(cam_pose, obj_sz, K, roi, shapecode, texturecode, shapenet_obj_cood)
-            # draw the object coordinate basis
-            R_w2c = cam_pose[:3, :3].transpose(-1, -2)
-            T_w2c = -torch.matmul(R_w2c, cam_pose[:3, 3:])
-            P_w2c = torch.cat((R_w2c, T_w2c), dim=1).numpy()
-            x_arrow_2d = K @ P_w2c @ torch.asarray([.5, 0., 0., 1.]).reshape([-1, 1])
-            x_arrow_2d = (x_arrow_2d[:2] / x_arrow_2d[2]).squeeze().numpy() - K[:2, 2].numpy()
-            y_arrow_2d = K @ P_w2c @ torch.asarray([0., .5, 0., 1.]).reshape([-1, 1])
-            y_arrow_2d = (y_arrow_2d[:2] / y_arrow_2d[2]).squeeze().numpy() - K[:2, 2].numpy()
-            z_arrow_2d = K @ P_w2c @ torch.asarray([0., 0., .5, 1.]).reshape([-1, 1])
-            z_arrow_2d = (z_arrow_2d[:2] / z_arrow_2d[2]).squeeze().numpy() - K[:2, 2].numpy()
-            generated_img = generated_img.cpu().numpy()
-            generated_img = cv2.arrowedLine(generated_img,
-                                            (int(img_sz / 2), int(img_sz / 2)),
-                                            (int(img_sz/2 + x_arrow_2d[0]), int(img_sz/2 + x_arrow_2d[1])),
-                                            (1, 0, 0))
-            generated_img = cv2.arrowedLine(generated_img,
-                                            (int(img_sz / 2), int(img_sz / 2)),
-                                            (int(img_sz/2 + y_arrow_2d[0]), int(img_sz/2 + y_arrow_2d[1])),
-                                            (0, 1, 0))
-            generated_img = cv2.arrowedLine(generated_img,
-                                            (int(img_sz / 2), int(img_sz / 2)),
-                                            (int(img_sz/2 + z_arrow_2d[0]), int(img_sz/2 + z_arrow_2d[1])),
-                                            (0, 0, 1))
-            virtual_imgs.append(torch.from_numpy(generated_img))
-
-        return virtual_imgs
 
     def save_img(self, generated_imgs, gt_imgs, masks_occ, obj_id, instance_num):
         # H, W = gt_imgs[0].shape[:2]

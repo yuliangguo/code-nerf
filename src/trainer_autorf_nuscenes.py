@@ -5,7 +5,7 @@ import torchvision
 import torch
 import torch.nn as nn
 import json
-from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8
+from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, render_rays
 from model_autorf import AutoRF
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -112,15 +112,16 @@ class TrainerAutoRFNuScenes:
                 shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
 
                 # render ray values and prepare target rays
-                rgb_rays, depth_rays, acc_trans_rays, tgt_rays, occ_pixels = self.render_rays(tgt_img, mask_occ,
-                                                                                            tgt_pose, obj_diag, K,
-                                                                                            roi, shapecode,
-                                                                                            texturecode,
-                                                                                            shapenet_obj_cood=True,
-                                                                                            sym_aug=sym_aug)
-
-                # loss_rgb = torch.sum((rgb_rays - tgt_pixels) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                loss_rgb = torch.sum((rgb_rays - tgt_rays) ** 2 * torch.abs(occ_pixels)) / (
+                rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
+                                                                                        tgt_img, mask_occ, tgt_pose,
+                                                                                        obj_diag, K, roi,
+                                                                                        self.hpams['n_rays'],
+                                                                                        self.hpams['n_samples'],
+                                                                                        shapecode, texturecode,
+                                                                                        shapenet_obj_cood=True,
+                                                                                        sym_aug=sym_aug)
+                # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
                             torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 # Occupancy loss
                 loss_occ = torch.sum(
@@ -184,46 +185,6 @@ class TrainerAutoRFNuScenes:
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
-
-    def render_rays(self, img, mask_occ, cam_pose, obj_diag, K, roi, shapecode, texturecode, shapenet_obj_cood, sym_aug):
-        # near and far sample range need to be adaptively calculated
-        near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
-        far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
-
-        rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
-
-        # For different sized roi, extract a random subset of pixels with fixed batch size
-        n_rays = np.minimum(rays_o.shape[0], self.hpams['n_rays'])
-        random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
-        rays_o = rays_o[random_ray_ids]
-        viewdir = viewdir[random_ray_ids]
-
-        # extract samples
-        tgt_pixels = img.reshape(-1, 3)[random_ray_ids].to(self.device)
-        mask_occ = mask_occ.reshape(-1, 1)[random_ray_ids].to(self.device)
-        mask_rgb = torch.clone(mask_occ)
-        mask_rgb[mask_rgb < 0] = 0
-
-        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.hpams['n_samples'])
-        xyz /= obj_diag
-
-        # Apply symmetric augmentation
-        if sym_aug and random.uniform(0, 1) > 0.5:
-            xyz[:, :, 1] *= (-1)
-            viewdir[:, :, 1] *= (-1)
-
-        # Nuscene to ShapeNet: frame rotate -90 degree around Z, coord rotate 90 degree around Z
-        if shapenet_obj_cood:
-            xyz = xyz[:, :, [1, 0, 2]]
-            xyz[:, :, 0] *= (-1)
-            viewdir = viewdir[:, :, [1, 0, 2]]
-            viewdir[:, :, 0] *= (-1)
-
-        sigmas, rgbs = self.model(xyz.to(self.device),
-                                  viewdir.to(self.device),
-                                  shapecode, texturecode)
-        rgb_rays, depth_rays, acc_trans_rays = volume_rendering2(sigmas, rgbs, z_vals.to(self.device))
-        return rgb_rays, depth_rays, acc_trans_rays, tgt_pixels, mask_occ
 
     def preprocess_img(self, img):
         img = img.unsqueeze(0).permute((0, 3, 1, 2))
