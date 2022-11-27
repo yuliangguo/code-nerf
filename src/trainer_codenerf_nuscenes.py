@@ -1,19 +1,15 @@
-import random
-
 import numpy as np
-import torchvision
-import torch
-import torch.nn as nn
-import json
-from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, render_rays
-from skimage.metrics import structural_similarity as compute_ssim
-from model_codenerf import CodeNeRF
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import os
-import imageio
 import time
 import math
+import json
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+
+from utils import image_float_to_uint8, render_rays, render_full_img
+from model_codenerf import CodeNeRF
 
 
 class TrainerNuScenes:
@@ -158,29 +154,9 @@ class TrainerNuScenes:
                 if self.niter % self.check_iter == 0:
                     # Just use the cropped region instead to save computation on the visualization
                     with torch.no_grad():
-                        # near and far sample range need to be adaptively calculated
-                        near = np.linalg.norm(tgt_pose[:, -1]) - obj_diag / 2
-                        far = np.linalg.norm(tgt_pose[:, -1]) + obj_diag / 2
-
-                        rays_o, viewdir = get_rays_nuscenes(K, tgt_pose, roi)
-                        xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, self.hpams['n_samples'])
-                        # Nuscene to ShapeNet: rotate 90 degree around Z and normalize to (-1 1)
-                        xyz /= obj_diag
-                        xyz = xyz[:, :, [1, 0, 2]]
-                        xyz[:, :, 0] *= (-1)
-                        viewdir = viewdir[:, :, [1, 0, 2]]
-                        viewdir[:, :, 0] *= -1
-
-                        generated_img = []
-                        sample_step = np.maximum(roi[2] - roi[0], roi[3] - roi[1])
-                        for i in range(0, xyz.shape[0], sample_step):
-                            sigmas, rgbs = self.model(xyz[i:i + sample_step].to(self.device),
-                                                      viewdir[i:i + sample_step].to(self.device),
-                                                      shapecode, texturecode)
-                            rgb_rays, _ = volume_rendering(sigmas, rgbs, z_vals.to(self.device))
-                            generated_img.append(rgb_rays)
-                        generated_img = torch.cat(generated_img).reshape(roi[3] - roi[1], roi[2] - roi[0], 3)
-
+                        generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
+                                                        self.hpams['n_samples'], shapecode, texturecode,
+                                                        shapenet_obj_cood=True)
                     gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)

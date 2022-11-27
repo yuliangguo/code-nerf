@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import json
 from data_srn import SRN
-from utils import get_rays, sample_from_rays, volume_rendering, image_float_to_uint8
+from utils import get_rays_srn, sample_from_rays, volume_rendering, image_float_to_uint8
 from model_codenerf import CodeNeRF
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -62,7 +62,7 @@ class Trainer():
                     # print(k, num_instances_per_obj, poses[0, k].shape, imgs.shape, 'k')
                     t1 = time.time()
                     self.opts.zero_grad()
-                    rays_o, viewdir = get_rays(H.item(), W.item(), focal, poses[0,k])
+                    rays_o, viewdir = get_rays_srn(H.item(), W.item(), focal, poses[0, k])
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                             self.hpams['N_samples'])
                     loss_per_img, generated_img = [], []

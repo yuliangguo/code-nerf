@@ -1,8 +1,6 @@
 import sys, os
-
 ROOT_DIR = os.path.abspath(os.path.join('', 'src'))
 sys.path.insert(0, os.path.join(ROOT_DIR))
-
 import argparse
 from datetime import date
 
@@ -16,9 +14,9 @@ if __name__ == '__main__':
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
     arg_parser.add_argument("--config_file", dest="config_file", default="autorf.nusc.vehicle.car.json")
     arg_parser.add_argument("--nusc_data_dir", dest="nusc_data_dir",
-                            default='/media/yuliangguo/data_ssd_4tb/Datasets/nuscenes/v1.0-trainval',
+                            default='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
                             help="nuscenes dataset dir")
-    arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-trainval',
+    arg_parser.add_argument("--nusc_version", dest="nusc_version", default='v1.0-mini',
                             help="version number required to load nuscene ground-truth")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
@@ -29,7 +27,7 @@ if __name__ == '__main__':
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--pretrained_model_dir", dest="pretrained_model_dir", default=None,
                             help="location of saved pretrained model and codes")
-    arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=10)
+    arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=6)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
     arg_parser.add_argument("--epochs", dest="epochs", default=20)
     arg_parser.add_argument("--resume_from_epoch", dest="resume_from_epoch", default=None)

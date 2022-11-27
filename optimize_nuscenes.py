@@ -1,8 +1,6 @@
 import sys, os
-
 ROOT_DIR = os.path.abspath(os.path.join('', 'src'))
 sys.path.insert(0, os.path.join(ROOT_DIR))
-
 import argparse
 
 from src.utils import str2bool

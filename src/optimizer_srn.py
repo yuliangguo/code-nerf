@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import json
 from data_srn import SRN
-from utils import get_rays, sample_from_rays, volume_rendering, image_float_to_uint8, rot_dist
+from utils import get_rays_srn, sample_from_rays, volume_rendering, image_float_to_uint8, rot_dist
 from skimage.metrics import structural_similarity as compute_ssim
 from model_codenerf import CodeNeRF
 from torch.utils.data import DataLoader
@@ -78,7 +78,7 @@ class Optimizer():
                 generated_imgs, gt_imgs = [], []
                 for num, instance_id in enumerate(instance_ids):
                     tgt_img, tgt_pose = tgt_imgs[num].reshape(-1,3), tgt_poses[num]
-                    rays_o, viewdir = get_rays(H.item(), W.item(), focal, tgt_pose)
+                    rays_o, viewdir = get_rays_srn(H.item(), W.item(), focal, tgt_pose)
                     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                             self.hpams['N_samples'])
                     loss_per_img, generated_img = [], []
@@ -116,7 +116,7 @@ class Optimizer():
                 for num in range(250):
                     if num not in instance_ids:
                         tgt_img, tgt_pose = imgs[0,num].reshape(-1,3), poses[0, num]
-                        rays_o, viewdir = get_rays(H.item(), W.item(), focal, poses[0, num])
+                        rays_o, viewdir = get_rays_srn(H.item(), W.item(), focal, poses[0, num])
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                                self.hpams['N_samples'])
                         loss_per_img, generated_img = [], []
@@ -206,7 +206,7 @@ class Optimizer():
                     t2opt = (t_vec_gt[num] * trans_pert).unsqueeze(-1)
                     rot_mat2opt = rot_trans.euler_angles_to_matrix(euler_angle2opt, 'XYZ')
                     pose2opt = torch.cat((rot_mat2opt, t2opt), dim=-1)
-                    rays_o, viewdir = get_rays(H.item(), W.item(), focal, pose2opt)
+                    rays_o, viewdir = get_rays_srn(H.item(), W.item(), focal, pose2opt)
 
                     # extract a random subset of pixels (batch size) to save memory, avoided graph retain issue in loop
                     n_rays = np.minimum(rays_o.shape[0], self.B)
@@ -241,7 +241,7 @@ class Optimizer():
                     generated_imgs = []
                     with torch.no_grad():
                         for num, instance_id in enumerate(instance_ids):
-                            rays_o, viewdir = get_rays(H.item(), W.item(), focal, optimized_poses[num])
+                            rays_o, viewdir = get_rays_srn(H.item(), W.item(), focal, optimized_poses[num])
                             xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'],
                                                                     self.hpams['far'],
                                                                     self.hpams['N_samples'])
@@ -281,7 +281,7 @@ class Optimizer():
                     if num not in instance_ids:
                         tgt_img, tgt_pose = imgs[0,num].reshape(-1,3), poses[0, num]
                         # TODO: use optimized poses to visualize here?
-                        rays_o, viewdir = get_rays(H.item(), W.item(), focal, poses[0, num])
+                        rays_o, viewdir = get_rays_srn(H.item(), W.item(), focal, poses[0, num])
                         xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, self.hpams['near'], self.hpams['far'],
                                                                self.hpams['N_samples'])
                         loss_per_img, generated_img = [], []

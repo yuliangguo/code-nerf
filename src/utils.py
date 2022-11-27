@@ -1,16 +1,12 @@
 import random
-import imageio
 import numpy as np
 import cv2
 import torch
 import argparse
-# import json
 import torchvision
-# from torchvision import transforms
-import os
 
 
-def get_rays(H, W, focal, c2w):
+def get_rays_srn(H, W, focal, c2w):
     i, j = torch.meshgrid(torch.linspace(0, W - 1, W), torch.linspace(0, H - 1, H))
     i = i.t()
     j = j.t()
@@ -23,7 +19,7 @@ def get_rays(H, W, focal, c2w):
     return rays_o, viewdirs
 
 
-def get_rays_nuscenes(K, c2w, roi):
+def get_rays(K, c2w, roi):
     """
     K: intrinsic matrix
     c2w: camera pose in object (world) coordinate frame
@@ -81,6 +77,9 @@ def volume_rendering(sigmas, rgbs, z_vals):
 
 
 def volume_rendering2(sigmas, rgbs, z_vals):
+    """
+        return accumulated transparency in addition
+    """
     deltas = z_vals[1:] - z_vals[:-1]
     deltas = torch.cat([deltas, torch.ones_like(deltas[:1]) * 1e10])
     alphas = 1 - torch.exp(-sigmas.squeeze(-1) * deltas)
@@ -98,7 +97,7 @@ def render_rays(model, device, img, mask_occ, cam_pose, obj_diag, K, roi, n_rays
     near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
     far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
 
-    rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
+    rays_o, viewdir = get_rays(K, cam_pose, roi)
 
     # For different sized roi, extract a random subset of pixels with fixed batch size
     n_rays = np.minimum(rays_o.shape[0], n_rays)
@@ -141,7 +140,8 @@ def render_full_img(model, device, cam_pose, obj_sz, K, roi, n_samples, shapecod
     near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
     far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
 
-    rays_o, viewdir = get_rays_nuscenes(K, cam_pose, roi)
+    rays_o, viewdir = get_rays(K, cam_pose, roi)
+
     xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, n_samples)
     xyz /= obj_diag
     # Nuscene to ShapeNet: rotate 90 degree around Z

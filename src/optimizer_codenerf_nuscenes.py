@@ -1,20 +1,16 @@
-import random
-
-import numpy as np
-import torchvision
-import torch
-import torch.nn as nn
 import json
-from utils import get_rays_nuscenes, sample_from_rays, volume_rendering, volume_rendering2, image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width, render_rays, render_full_img, render_virtual_imgs
-from skimage.metrics import structural_similarity as compute_ssim
-from model_codenerf import CodeNeRF
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import os
 import imageio
 import time
 import cv2
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
 import pytorch3d.transforms.rotation_conversions as rot_trans
+
+from utils import image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width, render_rays, render_full_img, render_virtual_imgs
+from skimage.metrics import structural_similarity as compute_ssim
+from model_codenerf import CodeNeRF
 
 
 class OptimizerNuScenes:
