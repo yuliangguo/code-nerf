@@ -27,7 +27,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--seg_source", dest="seg_source",
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
-    arg_parser.add_argument("--save_img", dest="save_img", default=False)
+    arg_parser.add_argument("--save_img", dest="save_img", default=True)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
                             help="if to optimize multiple annotations of the same instance jointly")

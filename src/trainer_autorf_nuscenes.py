@@ -60,7 +60,7 @@ class TrainerAutoRFNuScenes:
             self.save_models(epoch=self.nepoch)
             self.nepoch += 1
 
-    def training_single_epoch(self, sym_aug=False):
+    def training_single_epoch(self):
         """
             Optimize on each annotation frame independently
         """
@@ -113,8 +113,8 @@ class TrainerAutoRFNuScenes:
                                                                                         self.hpams['n_rays'],
                                                                                         self.hpams['n_samples'],
                                                                                         shapecode, texturecode,
-                                                                                        shapenet_obj_cood=True,
-                                                                                        sym_aug=sym_aug)
+                                                                                        self.hpams['shapenet_obj_cood'],
+                                                                                        self.hpams['sym_aug'])
                 # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                 loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
                             torch.sum(torch.abs(occ_pixels)) + 1e-9)
@@ -137,7 +137,7 @@ class TrainerAutoRFNuScenes:
                     with torch.no_grad():
                         generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
                                                         self.hpams['n_samples'], shapecode, texturecode,
-                                                        shapenet_obj_cood=True)
+                                                        self.hpams['shapenet_obj_cood=True'])
                     gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)

@@ -62,7 +62,7 @@ class OptimizerNuScenes:
         self.R_eval = {}
         self.T_eval = {}
 
-    def optimize_objs(self, save_img=True, shapenet_obj_cood=True, sym_aug=True):
+    def optimize_objs(self, save_img=True):
         """
             Optimize on each annotation frame independently
         """
@@ -130,7 +130,8 @@ class OptimizerNuScenes:
                                                                                             self.hpams['n_rays'],
                                                                                             self.hpams['n_samples'],
                                                                                             shapecode, texturecode,
-                                                                                            shapenet_obj_cood, sym_aug)
+                                                                                            self.hpams['shapenet_obj_cood'],
+                                                                                            self.hpams['sym_aug'])
 
                     # Compute losses
                     # loss_rgb = torch.sum((rgb_rays - tgt_pixels) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
@@ -158,14 +159,14 @@ class OptimizerNuScenes:
                             # render full image
                             generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
                                                             self.hpams['n_samples'], shapecode, texturecode,
-                                                            shapenet_obj_cood)
+                                                            self.hpams['shapenet_obj_cood'])
                             generated_imgs.append(generated_img)
                         self.save_img(generated_imgs, gt_imgs, gt_masks_occ, anntoken, self.nopts)
                         # save virtual views at the beginning and the end
                         if self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts']-1):
                             virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
                                                                self.hpams['n_samples'], shapecode, texturecode,
-                                                               shapenet_obj_cood)
+                                                               self.hpams['shapenet_obj_cood'])
                             self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % self.hpams['optimize']['lr_half_interval'] == 0:
@@ -179,7 +180,7 @@ class OptimizerNuScenes:
             self.optimized_ann_flag[anntoken] = 1
             self.save_opts(batch_idx)
 
-    def optimize_objs_w_pose(self, save_img=True, shapenet_obj_cood=True, sym_aug=True, obj_sz_reg=False, euler_rot=False):
+    def optimize_objs_w_pose(self, save_img=True):
         """
             Optimize on each annotation frame independently
         """
@@ -224,7 +225,7 @@ class OptimizerNuScenes:
 
             rot_mat_vec = pred_poses[:, :3, :3]
             trans_vec = pred_poses[:, :3, 3].to(self.device).detach().requires_grad_()
-            if euler_rot:
+            if self.hpams['euler_rot']:
                 rot_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(self.device).detach().requires_grad_()
             else:
                 rot_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
@@ -244,7 +245,7 @@ class OptimizerNuScenes:
                 tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[0], tgt_poses[0], masks_occ[0], rois[0], cam_intrinsics[0]
 
                 t2opt = trans_vec[0].unsqueeze(-1)
-                if euler_rot:
+                if self.hpams['euler_rot']:
                     rot_mat2opt = rot_trans.euler_angles_to_matrix(rot_vec[0], 'XYZ')
                 else:
                     rot_mat2opt = rot_trans.axis_angle_to_matrix(rot_vec[0])
@@ -264,7 +265,8 @@ class OptimizerNuScenes:
                                                                                         self.hpams['n_rays'],
                                                                                         self.hpams['n_samples'],
                                                                                         shapecode, texturecode,
-                                                                                        shapenet_obj_cood, sym_aug)
+                                                                                        self.hpams['shapenet_obj_cood'],
+                                                                                        self.hpams['sym_aug'])
 
                 # Compute losses
                 # Critical to let rgb supervised on white background
@@ -279,10 +281,10 @@ class OptimizerNuScenes:
                 loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
 
                 # # Apply symmetric augmentation (v2)
-                # if sym_aug:
+                # if self.hpams['sym_aug']:
                 #     xyz_sym = torch.clone(xyz)
                 #     viewdir_sym = torch.clone(viewdir)
-                #     if shapenet_obj_cood:
+                #     if self.hpams['shapenet_obj_cood']:
                 #         xyz_sym[:, :, 0] *= (-1)
                 #         viewdir_sym[:, :, 0] *= (-1)
                 #     else:
@@ -294,8 +296,8 @@ class OptimizerNuScenes:
                 #     loss_sym = torch.mean((sigmas - sigmas_sym) ** 2)
                 #     loss = loss + self.hpams['loss_sym_coef'] * loss_sym
 
-                if obj_sz_reg:
-                    sz_reg_samples = generate_obj_sz_reg_samples(obj_sz, obj_diag, shapenet_obj_cood, tau=0.05)
+                if self.hpams['obj_sz_reg']:
+                    sz_reg_samples = generate_obj_sz_reg_samples(obj_sz, obj_diag, self.hpams['shapenet_obj_cood'], tau=0.05)
                     loss_obj_sz = self.loss_obj_sz(sz_reg_samples, shapecode, texturecode)
                     loss = loss + self.hpams['loss_obj_sz_coef'] * loss_obj_sz
 
@@ -324,7 +326,7 @@ class OptimizerNuScenes:
                         # render full image
                         generated_img = render_full_img(self.model, self.device, pose2opt, obj_sz, K, roi,
                                                         self.hpams['n_samples'], shapecode, texturecode,
-                                                        shapenet_obj_cood)
+                                                        self.hpams['shapenet_obj_cood'])
                         # mark pose error on the image
                         err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[0], errs_T[0])
                         generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
@@ -336,7 +338,7 @@ class OptimizerNuScenes:
                         if self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                             virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
                                                                self.hpams['n_samples'], shapecode, texturecode,
-                                                               shapenet_obj_cood)
+                                                               self.hpams['shapenet_obj_cood'])
 
                             self.save_virtual_img(virtual_imgs, anntoken, self.nopts)
                 self.nopts += 1
@@ -352,7 +354,7 @@ class OptimizerNuScenes:
             self.log_eval_pose(est_poses, tgt_poses, batch_data['anntoken'])
             self.save_opts_w_pose(batch_idx)
 
-    def optimize_objs_multi_anns(self, save_img=True, shapenet_obj_cood=True, sym_aug=True):
+    def optimize_objs_multi_anns(self, save_img=True):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
@@ -408,7 +410,8 @@ class OptimizerNuScenes:
                                                                                             self.hpams['n_rays'],
                                                                                             self.hpams['n_samples'],
                                                                                             shapecode, texturecode,
-                                                                                            shapenet_obj_cood, sym_aug)
+                                                                                            self.hpams['shapenet_obj_cood'],
+                                                                                            self.hpams['sym_aug'])
                     # Compute losses
                     # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (torch.sum(torch.abs(occ_pixels))+1e-9)
@@ -440,7 +443,7 @@ class OptimizerNuScenes:
                             # render full image
                             generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
                                                             self.hpams['n_samples'], shapecode, texturecode,
-                                                            shapenet_obj_cood)
+                                                            self.hpams['shapenet_obj_cood'])
                             generated_imgs.append(generated_img)
                         self.save_img(generated_imgs, gt_imgs, gt_masks_occ, instoken, self.nopts)
 
@@ -449,7 +452,7 @@ class OptimizerNuScenes:
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[0])['size']
                             virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
                                                                self.hpams['n_samples'], shapecode, texturecode,
-                                                               shapenet_obj_cood)
+                                                               self.hpams['shapenet_obj_cood'])
                             self.save_virtual_img(virtual_imgs, instoken, self.nopts)
 
                 self.nopts += 1
@@ -462,7 +465,7 @@ class OptimizerNuScenes:
             self.optimized_ins_flag[instoken] = 1
             self.save_opts(obj_idx)
 
-    def optimize_objs_multi_anns_w_pose(self, save_img=True, shapenet_obj_cood=True, sym_aug=True, euler_rot=False):
+    def optimize_objs_multi_anns_w_pose(self, save_img=True):
         """
             optimize multiple annotations for the same instance in a singe iteration
         """
@@ -493,7 +496,7 @@ class OptimizerNuScenes:
 
             rot_mat_vec = pred_poses[:, :3, :3]
             trans_vec = pred_poses[:, :3, 3].to(self.device).detach().requires_grad_()
-            if euler_rot:
+            if self.hpams['euler_rot']:
                 rot_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(self.device).detach().requires_grad_()
             else:
                 rot_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
@@ -512,7 +515,7 @@ class OptimizerNuScenes:
                     tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[num], tgt_poses[num], masks_occ[num], rois[num], cam_intrinsics[num]
 
                     t2opt = trans_vec[num].unsqueeze(-1)
-                    if euler_rot:
+                    if self.hpams['euler_rot']:
                         rot_mat2opt = rot_trans.euler_angles_to_matrix(rot_vec[num], 'XYZ')
                     else:
                         rot_mat2opt = rot_trans.axis_angle_to_matrix(rot_vec[num])
@@ -535,7 +538,8 @@ class OptimizerNuScenes:
                                                                                             self.hpams['n_rays'],
                                                                                             self.hpams['n_samples'],
                                                                                             shapecode, texturecode,
-                                                                                            shapenet_obj_cood, sym_aug)
+                                                                                            self.hpams['shapenet_obj_cood'],
+                                                                                            self.hpams['sym_aug'])
                     # Compute losses
                     # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                     loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (torch.sum(torch.abs(occ_pixels))+1e-9)
@@ -574,7 +578,7 @@ class OptimizerNuScenes:
                             # render full image
                             generated_img = render_full_img(self.model, self.device, pose2opt, obj_sz, K, roi,
                                                             self.hpams['n_samples'], shapecode, texturecode,
-                                                            shapenet_obj_cood)
+                                                            self.hpams['shapenet_obj_cood'])
                             # mark pose error on the image
                             err_str = 'R err: {:.3f}, T err: {:.3f}'.format(errs_R[num], errs_T[num])
                             generated_img = cv2.putText(generated_img.cpu().numpy(), err_str, (5, 10),
@@ -590,7 +594,7 @@ class OptimizerNuScenes:
                             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntokens[0])['size']
                             virtual_imgs = render_virtual_imgs(self.model, self.device, obj_sz, cam_intrinsics[0],
                                                                self.hpams['n_samples'], shapecode, texturecode,
-                                                               shapenet_obj_cood)
+                                                               self.hpams['shapenet_obj_cood'])
                             self.save_virtual_img(virtual_imgs, instoken, self.nopts)
                 self.nopts += 1
                 if self.nopts % self.hpams['optimize']['lr_half_interval'] == 0:

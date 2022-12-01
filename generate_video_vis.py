@@ -3,7 +3,7 @@ import glob
 
 
 if __name__ == '__main__':
-    result_path = 'exps/srncar_08182022/test_nuscenes_use_instance_multi_ann_opt_pose/*'
+    result_path = './exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_11_23/test_nuscenes_use_instance/*'
     # result_path = 'exps/srncar_08182022/test_rpert0.1_tpert0.1_nops200_nview1/*'
     tgt_paths = glob.glob(result_path)
 

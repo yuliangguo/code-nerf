@@ -19,7 +19,10 @@
     {"type":  "step", "lr":  1e-4, "interval":  250000},
     {"type":  "step", "lr":  1e-4, "interval":  250000}
   ],
-  "check_points": 1100000,
+  "shapenet_obj_cood": 1,
+  "sym_aug": 0,
+  "obj_sz_reg": 0,
+  "euler_rot": 0,
   "optimize": {
     "num_opts": 100,
     "lr_shape": 0.01,
