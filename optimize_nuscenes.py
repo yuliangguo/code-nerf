@@ -4,8 +4,7 @@ sys.path.insert(0, os.path.join(ROOT_DIR))
 import argparse
 
 from src.utils import str2bool
-from src.optimizer_codenerf_nuscenes import OptimizerNuScenes
-from src.optimizer_autorf_nuscenes import OptimizerAutoRFNuScenes
+from src.optimizer_nuscenes import OptimizerNuScenes
 from src.data_nuscenes import NuScenesData
 
 
@@ -13,8 +12,6 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description="CodeNeRF")
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
     arg_parser.add_argument("--config_file", dest="config_file", default="autorf.nusc.vehicle.car.json")
-    arg_parser.add_argument("--model_dir", dest="model_dir", default='exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_11_23',
-                            help="location of saved pretrained model and codes")
     arg_parser.add_argument("--nusc_cat", dest="nusc_cat", default='vehicle.car',
                             help="nuscence category name")
     arg_parser.add_argument("--seg_cat", dest="seg_cat", default='car',
@@ -27,7 +24,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--seg_source", dest="seg_source",
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
-    arg_parser.add_argument("--save_img", dest="save_img", default=True)
+    arg_parser.add_argument("--save_img", dest="save_img", default=False)
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=True,
                             help="if to optimize multiple annotations of the same instance jointly")
@@ -35,9 +32,8 @@ if __name__ == '__main__':
                             help="if to optimize camera poses, if true the dataloader will generate erroneous poses")
     arg_parser.add_argument("--rot_err", dest="rot_err", default=0.2,
                             help='add rotation error in rad to data loading when optimizing pose')
-    arg_parser.add_argument("--t_err", dest="t_err", default=0.001,
+    arg_parser.add_argument("--t_err", dest="t_err", default=0.01,
                             help='add translation error in ratio added in data loading when optimizing pose')
-
     args = arg_parser.parse_args()
 
     nusc_seg_dir = os.path.join(args.nusc_data_dir, 'pred_' + args.seg_source)
@@ -66,12 +62,8 @@ if __name__ == '__main__':
         max_t_pert=args.t_err,
     )
 
-    if 'autorf' in args.config_file:
-        optimizer = OptimizerAutoRFNuScenes(args.model_dir, args.gpu, nusc_dataset, args.config_file,
-                                            num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
-    else:
-        optimizer = OptimizerNuScenes(args.model_dir, args.gpu, nusc_dataset, args.config_file,
-                                      num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
+    optimizer = OptimizerNuScenes(args.gpu, nusc_dataset, args.config_file,
+                                  num_workers=args.num_workers, shuffle=False, save_postfix=save_postfix)
 
     if args.opt_pose:
         if args.multi_ann_ops:

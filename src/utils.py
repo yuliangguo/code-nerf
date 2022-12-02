@@ -228,6 +228,28 @@ def render_virtual_imgs(model, device, obj_sz, K, n_samples, shapecode, texturec
     return virtual_imgs
 
 
+def calc_cam_pose_err(est_cam_poses, tgt_cam_poses):
+    est_R = est_cam_poses[:, :3, :3]
+    est_T = est_cam_poses[:, :3, 3]
+    tgt_R = tgt_cam_poses[:, :3, :3]
+    tgt_T = tgt_cam_poses[:, :3, 3]
+
+    err_R = rot_dist(est_R, tgt_R)
+    err_T = torch.sqrt(torch.sum((est_T - tgt_T) ** 2, dim=-1))
+    return err_R, err_T
+
+
+def calc_obj_pose_err(est_cam_poses, tgt_cam_poses):
+    est_R = est_cam_poses[:, :3, :3].transpose(-1, -2)
+    est_T = -torch.matmul(est_R, est_cam_poses[:, :3, 3:]).squeeze(-1)
+    tgt_R = tgt_cam_poses[:, :3, :3].transpose(-1, -2)
+    tgt_T = -torch.matmul(tgt_R, tgt_cam_poses[:, :3, 3:]).squeeze(-1)
+
+    err_R = rot_dist(est_R, tgt_R)
+    err_T = torch.sqrt(torch.sum((est_T - tgt_T) ** 2, dim=-1))
+    return err_R, err_T
+
+
 def image_float_to_uint8(img):
     """
     Convert a float image (0.0-1.0) to uint8 (0-255)

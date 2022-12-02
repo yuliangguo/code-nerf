@@ -374,10 +374,12 @@ class NuScenesData:
         imgs = []
         masks_occ = []
         cam_poses = []
+        obj_poses = []
         cam_intrinsics = []
         rois = []  # used to sample rays
         valid_flags = []
         cam_poses_w_err = []
+        obj_poses_w_err = []
 
         # TODO: apply different parsing depending on the segmentation type
         # For each annotation (one annotation per timestamp) get all the sensors
@@ -404,6 +406,7 @@ class NuScenesData:
                     # compute the camera pose in object frame, make sure dataset and model definitions consistent
                     obj_center = box.center
                     obj_orientation = box.orientation.rotation_matrix
+                    obj_pose = np.concatenate([obj_orientation, np.expand_dims(obj_center, -1)], axis=1)
 
                     # ATTENTION: add Rot error in the object's coordinate, and T error
                     if self.add_pose_err:
@@ -416,7 +419,8 @@ class NuScenesData:
                         # trans_err_ratio = random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert)
                         trans_err_ratio = 1. + random.choice([1., -1.]) * self.max_t_pert
                         obj_center_w_err = obj_center * trans_err_ratio
-                        obj_orientation_w_err = obj_orientation @ rot_err
+                        obj_orientation_w_err = obj_orientation @ rot_err  # rot error need to right --> to model points
+                        obj_pose_w_err = np.concatenate([obj_orientation_w_err, np.expand_dims(obj_center_w_err, -1)], axis=1)
                         R_c2o_w_err = obj_orientation_w_err.transpose()
                         t_c2o_w_err = -R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
                         cam_pose_w_err = np.concatenate([R_c2o_w_err, t_c2o_w_err], axis=1)
@@ -471,10 +475,12 @@ class NuScenesData:
                         rois.append(box_2d)
                         cam_intrinsics.append(camera_intrinsic)
                         cam_poses.append(cam_pose)
+                        obj_poses.append(obj_pose)
                         valid_flags.append(1)
 
                         if self.add_pose_err:
                             cam_poses_w_err.append(cam_pose_w_err)
+                            obj_poses_w_err.append(obj_pose_w_err)
 
                         if self.debug:
                             print(
@@ -517,44 +523,39 @@ class NuScenesData:
                 rois.append(np.array([-1, -1, -1, -1]))
                 cam_intrinsics.append(np.zeros((3, 3)).astype(np.float32))
                 cam_poses.append(np.zeros((3, 4)).astype(np.float32))
+                obj_poses.append(np.zeros((3, 4)).astype(np.float32))
                 valid_flags.append(0)
 
                 if self.add_pose_err:
                     cam_poses_w_err.append(np.zeros((3, 4)).astype(np.float32))
+                    obj_poses_w_err.append(np.zeros((3, 4)).astype(np.float32))
 
         sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
         sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
         sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
         sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
         sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        sample_data['obj_poses'] = torch.from_numpy(np.asarray(obj_poses).astype(np.float32))
         sample_data['valid_flags'] = np.asarray(valid_flags)
         sample_data['instoken'] = instoken
         sample_data['anntoken'] = anntoken
 
         if self.add_pose_err:
             sample_data['cam_poses_w_err'] = torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32))
+            sample_data['obj_poses_w_err'] = torch.from_numpy(np.asarray(obj_poses_w_err).astype(np.float32))
 
         return sample_data
 
-        # imgs = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
-        # masks_occ = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
-        # rois = torch.from_numpy(np.asarray(rois).astype(np.int32))
-        # cam_intrinsics = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
-        # cam_poses = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
-        # valid_flags = np.asarray(valid_flags)
-        # instoken = instoken
-        # anntoken = anntoken
-        #
-        # return imgs, masks_occ, rois, cam_intrinsics, cam_poses, valid_flags, instoken, anntoken
-
     def get_ins_samples(self, instoken):
+        samples = {}
         anntokens = self.ins_ann_tokens[instoken]
-
         # extract fixed number of qualified samples per instance
         imgs = []
         masks_occ = []
         cam_poses = []
         cam_poses_w_err = []
+        obj_poses = []
+        obj_poses_w_err = []
         cam_intrinsics = []
         rois = []  # used to sample rays
         out_anntokens = []
@@ -587,6 +588,7 @@ class NuScenesData:
                         # compute the camera pose in object frame, make sure dataset and model definitions consistent
                         obj_center = box.center
                         obj_orientation = box.orientation.rotation_matrix
+                        obj_pose = np.concatenate([obj_orientation, np.expand_dims(obj_center, -1)], axis=1)
 
                         # ATTENTION: add Rot error in the object's coordinate, and T error
                         if self.add_pose_err:
@@ -599,7 +601,8 @@ class NuScenesData:
                             # trans_err_ratio = random.uniform(1.0-self.max_t_pert, 1.0+self.max_t_pert)
                             trans_err_ratio = 1. + random.choice([1., -1.]) * self.max_t_pert
                             obj_center_w_err = obj_center * trans_err_ratio
-                            obj_orientation_w_err = obj_orientation @ rot_err
+                            obj_orientation_w_err = obj_orientation @ rot_err# rot error need to right --> to model points
+                            obj_pose_w_err = np.concatenate([obj_orientation_w_err, np.expand_dims(obj_center_w_err, -1)], axis=1)
                             R_c2o_w_err = obj_orientation_w_err.transpose()
                             # ATTENTION: t_c2o_w_err is proportional to t_c2o because added error to R
                             t_c2o_w_err = -R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
@@ -656,10 +659,12 @@ class NuScenesData:
                             rois.append(box_2d)
                             cam_intrinsics.append(camera_intrinsic)
                             cam_poses.append(cam_pose)
+                            obj_poses.append(obj_pose)
                             out_anntokens.append(anntoken)
 
                             if self.add_pose_err:
                                 cam_poses_w_err.append(cam_pose_w_err)
+                                obj_poses_w_err.append(obj_pose_w_err)
 
                             if self.debug:
                                 print(
@@ -694,26 +699,40 @@ class NuScenesData:
                     # if len(imgs) == 1:
                     #     break
 
-        if len(imgs) == 0:
-            if self.add_pose_err:
-                return None, None, None, None, None, None, None
-            return None, None, None, None, None, None
+        samples['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.)
+        samples['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
+        samples['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
+        samples['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
+        samples['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
+        samples['obj_poses'] = torch.from_numpy(np.asarray(obj_poses).astype(np.float32))
+        samples['anntokens'] = out_anntokens
 
         if self.add_pose_err:
-            return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
-                   torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
-                   torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-                   torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
-                   torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
-                   torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32)), \
-                   np.asarray(out_anntokens)
+            samples['cam_poses_w_err'] = torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32))
+            samples['obj_poses_w_err'] = torch.from_numpy(np.asarray(obj_poses_w_err).astype(np.float32))
 
-        return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
-               torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
-               torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-               torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
-               torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
-               np.asarray(out_anntokens)
+        return samples
+
+        # if len(imgs) == 0:
+        #     if self.add_pose_err:
+        #         return None, None, None, None, None, None, None
+        #     return None, None, None, None, None, None
+        #
+        # if self.add_pose_err:
+        #     return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
+        #            torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
+        #            torch.from_numpy(np.asarray(rois).astype(np.int32)), \
+        #            torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
+        #            torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
+        #            torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32)), \
+        #            np.asarray(out_anntokens)
+        #
+        # return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
+        #        torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
+        #        torch.from_numpy(np.asarray(rois).astype(np.int32)), \
+        #        torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
+        #        torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
+        #        np.asarray(out_anntokens)
 
 
 if __name__ == '__main__':

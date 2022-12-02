@@ -1,5 +1,6 @@
 {
   "arch": "codenerf",
+  "model_dir": "exps_nuscenes_codenerf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_10_06",
   "net_hyperparams": {
     "shape_blocks": 3,
     "texture_blocks": 1,
@@ -25,7 +26,8 @@
   "euler_rot": 0,
   "optimize": {
     "num_opts": 100,
-    "lr_shape": 0.01,
+    "opt_obj_pose": 1,
+    "lr_shape": 0.02,
     "lr_texture": 0.02,
     "lr_pose": 0.01,
     "lr_half_interval": 1000
