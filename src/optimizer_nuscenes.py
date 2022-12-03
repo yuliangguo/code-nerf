@@ -16,16 +16,13 @@ from model_codenerf import CodeNeRF
 
 
 class OptimizerNuScenes:
-    def __init__(self, gpu, nusc_dataset, jsonfile='srncar.json',
+    def __init__(self, gpu, nusc_dataset, hpams,
                  save_postfix='_nuscenes', num_workers=0, shuffle=False):
         """
 
         """
         super().__init__()
-        # Read Hyperparameters
-        hpampath = os.path.join('jsonfiles', jsonfile)
-        with open(hpampath, 'r') as f:
-            self.hpams = json.load(f)
+        self.hpams = hpams
         self.save_postfix = save_postfix
         self.device = torch.device('cuda:' + str(gpu))
         self.make_model()

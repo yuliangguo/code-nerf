@@ -8,6 +8,23 @@
     "num_xyz_freq": 10,
     "num_dir_freq": 4
   },
+  "dataset": {
+    "name": "nusc",
+    "nusc_cat": "vehicle.car",
+    "seg_cat": "car",
+    "train_data_dir": "/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini",
+    "train_nusc_version": "v1.0-mini",
+    "test_data_dir": "/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini",
+    "test_nusc_version": "v1.0-mini",
+    "img_h": 900,
+    "img_w": 1600,
+    "mask_pixels": 2500,
+    "box_iou_th": 0.5,
+    "max_dist": 40,
+    "divisor": 1000,
+    "max_rot_pert": 0.2,
+    "max_t_pert": 0.01
+  },
   "n_rays": 1024,
   "n_samples": 64,
   "roi_margin": 5,

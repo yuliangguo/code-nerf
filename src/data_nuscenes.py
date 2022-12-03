@@ -255,23 +255,33 @@ def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
 
 
 # TODO: make an initial pre-process save all the valid cases?
+# class NuScenesData:
+#     def __init__(self, nusc_cat='vehicle.car',
+#                  seg_cat='car',
+#                  nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
+#                  nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
+#                  nusc_version='v1.0-mini',
+#                  split='train',
+#                  num_cams_per_sample=1,
+#                  divisor=1000,
+#                  box_iou_th=0.5,
+#                  max_dist=40,
+#                  mask_pixels=10000,
+#                  img_h=900,
+#                  img_w=1600,
+#                  add_pose_err=False,
+#                  max_rot_pert=0.2,
+#                  max_t_pert=0.1,
+#                  debug=False,
+#                  ):
 class NuScenesData:
-    def __init__(self, nusc_cat='vehicle.car',
-                 seg_cat='car',
-                 nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-                 nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
-                 nusc_version='v1.0-mini',
+    def __init__(self, hpams,
+                 nusc_data_dir,
+                 nusc_seg_dir,
+                 nusc_version,
                  split='train',
                  num_cams_per_sample=1,
-                 divisor=1000,
-                 box_iou_th=0.5,
-                 max_dist=40,
-                 mask_pixels=10000,
-                 img_h=900,
-                 img_w=1600,
                  add_pose_err=False,
-                 max_rot_pert=0.2,
-                 max_t_pert=0.1,
                  debug=False,
                  ):
         """
@@ -281,22 +291,21 @@ class NuScenesData:
             Each instance contains multiple annotations from different timestamps
             Each annotation could be projected to multiple camera inputs at the same timestamp.
         """
-        self.nusc_cat = nusc_cat
-        self.seg_cat = seg_cat
-        self.divisor = divisor
-        self.box_iou_th = box_iou_th
-        self.max_dist = max_dist
-        self.mask_pixels = mask_pixels
-        self.img_h = img_h
-        self.img_w = img_w
+        self.nusc_cat = hpams['dataset']['nusc_cat']
+        self.seg_cat = hpams['dataset']['seg_cat']
+        self.divisor = hpams['dataset']['divisor']
+        self.box_iou_th = hpams['dataset']['box_iou_th']
+        self.max_dist = hpams['dataset']['max_dist']
+        self.mask_pixels = hpams['dataset']['mask_pixels']
+        self.img_h = hpams['dataset']['img_h']
+        self.img_w = hpams['dataset']['img_w']
         self.debug = debug
 
         self.nusc_data_dir = nusc_data_dir
         self.nusc_seg_dir = nusc_seg_dir
+        nusc_cat = hpams['dataset']['nusc_cat']
         self.nusc = NuScenes(version=nusc_version, dataroot=nusc_data_dir, verbose=True)
-        # self.nusc.list_scenes()
         instance_all = self.nusc.instance
-        # self.tgt_instance_list = []
         self.instokens = []
         self.anntokens = []  # multiple anntokens can have the same instoken
         self.ins_ann_tokens = {}
@@ -357,8 +366,8 @@ class NuScenesData:
         # for adding error to pose
         self.add_pose_err = add_pose_err
         if self.add_pose_err:
-            self.max_rot_pert = max_rot_pert
-            self.max_t_pert = max_t_pert
+            self.max_rot_pert = hpams['dataset']['max_rot_pert']
+            self.max_t_pert = hpams['dataset']['max_t_pert']
 
     def __len__(self):
         return self.lenids
@@ -712,27 +721,6 @@ class NuScenesData:
             samples['obj_poses_w_err'] = torch.from_numpy(np.asarray(obj_poses_w_err).astype(np.float32))
 
         return samples
-
-        # if len(imgs) == 0:
-        #     if self.add_pose_err:
-        #         return None, None, None, None, None, None, None
-        #     return None, None, None, None, None, None
-        #
-        # if self.add_pose_err:
-        #     return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
-        #            torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
-        #            torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-        #            torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
-        #            torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
-        #            torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32)), \
-        #            np.asarray(out_anntokens)
-        #
-        # return torch.from_numpy(np.asarray(imgs).astype(np.float32) / 255.), \
-        #        torch.from_numpy(np.asarray(masks_occ).astype(np.float32)), \
-        #        torch.from_numpy(np.asarray(rois).astype(np.int32)), \
-        #        torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32)), \
-        #        torch.from_numpy(np.asarray(cam_poses).astype(np.float32)), \
-        #        np.asarray(out_anntokens)
 
 
 if __name__ == '__main__':

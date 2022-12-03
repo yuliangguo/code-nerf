@@ -137,7 +137,7 @@ class TrainerAutoRFNuScenes:
                     with torch.no_grad():
                         generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
                                                         self.hpams['n_samples'], shapecode, texturecode,
-                                                        self.hpams['shapenet_obj_cood=True'])
+                                                        self.hpams['shapenet_obj_cood'])
                     gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
