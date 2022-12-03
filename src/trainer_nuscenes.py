@@ -1,14 +1,16 @@
 import numpy as np
 import os
 import time
-import math
 import json
+import math
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.transforms import Resize
 
 from utils import image_float_to_uint8, render_rays, render_full_img
+from model_autorf import AutoRF
 from model_codenerf import CodeNeRF
 
 
@@ -31,6 +33,7 @@ class TrainerNuScenes:
         self.batch_size = batch_size
         self.niter, self.nepoch = 0, 0
         self.check_iter = check_iter
+
         self.make_savedir(save_dir)
         print('we are going to save at ', self.save_dir)
 
@@ -39,9 +42,9 @@ class TrainerNuScenes:
         self.mean_shape = None
         self.mean_texture = None
         if pretrained_model_dir is not None:
-            self.load_pretrained_model_codes(pretrained_model_dir)
+            self.load_pretrained_model(pretrained_model_dir)
 
-        # initialize shapecode, texturecode
+        # initialize shapecode, texturecode (only for codenerf to use)
         self.shape_codes = None
         self.texture_codes = None
         self.instoken2idx = {}
@@ -57,8 +60,7 @@ class TrainerNuScenes:
         if resume_from_epoch is not None:
             self.resume_from_epoch(save_dir, resume_from_epoch)
 
-    def training(self, epochs):
-
+    def train(self, epochs):
         # initialize the losses here to avoid memory leak between epochs
         self.losses_rgb = []
         self.losses_occ = []
@@ -70,12 +72,12 @@ class TrainerNuScenes:
 
         while self.nepoch < epochs:
             print(f'epoch: {self.nepoch}')
-            self.training_single_epoch()
+            self.training_epoch()
 
             self.save_models(epoch=self.nepoch)
             self.nepoch += 1
 
-    def training_single_epoch(self):
+    def training_epoch(self):
         """
             Optimize on each annotation frame independently
         """
@@ -107,11 +109,6 @@ class TrainerNuScenes:
                 rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W-1))
                 rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H-1))
 
-                code_idx = self.instoken2idx[instoken]
-                code_idx = torch.as_tensor(code_idx).to(self.device)
-                shapecode = self.shape_codes(code_idx)
-                texturecode = self.texture_codes(code_idx)
-
                 tgt_img, tgt_pose, mask_occ, roi, K = \
                     imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
 
@@ -122,6 +119,21 @@ class TrainerNuScenes:
                 tgt_img = tgt_img * (mask_occ > 0)
                 tgt_img = tgt_img + (mask_occ < 0)
 
+                if self.hpams['arch'] == 'autorf':
+                    # preprocess image and predict shapecode and texturecode
+                    img_in = self.preprocess_img(tgt_img)
+                    shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
+                elif self.hpams['arch'] == 'codenerf':
+                    code_idx = self.instoken2idx[instoken]
+                    code_idx = torch.as_tensor(code_idx).to(self.device)
+                    shapecode = self.shape_codes(code_idx)
+                    texturecode = self.texture_codes(code_idx)
+                    self.optimized_idx[code_idx.item()] = 1
+                else:
+                    shapecode = None
+                    texturecode = None
+                    print('ERROR: No valid network architecture is declared in config file!')
+
                 # render ray values and prepare target rays
                 rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
                                                                                         tgt_img, mask_occ, tgt_pose,
@@ -131,8 +143,6 @@ class TrainerNuScenes:
                                                                                         shapecode, texturecode,
                                                                                         self.hpams['shapenet_obj_cood'],
                                                                                         self.hpams['sym_aug'])
-
-                # Compute losses
                 # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
                 loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
                             torch.sum(torch.abs(occ_pixels)) + 1e-9)
@@ -141,15 +151,11 @@ class TrainerNuScenes:
                     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
                                    torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                # self.loss_total += (loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg)
-                # self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
-                self.loss_total += loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
+                self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
 
                 self.losses_rgb.append(loss_rgb.detach().item())
                 self.losses_occ.append(loss_occ.detach().item())
                 self.losses_reg.append(loss_reg.detach().item())
-                # optimized_batch = True
-                self.optimized_idx[code_idx.item()] = 1
 
                 if self.niter % self.check_iter == 0:
                     # Just use the cropped region instead to save computation on the visualization
@@ -179,6 +185,16 @@ class TrainerNuScenes:
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
 
+    def preprocess_img(self, img):
+        img = img.unsqueeze(0).permute((0, 3, 1, 2))
+        _, _, im_h, im_w = img.shape
+        if np.maximum(im_h, im_w) > self.hpams['max_img_sz']:
+            ratio = self.hpams['max_img_sz'] / np.maximum(im_h, im_w)
+            new_h = im_h * ratio
+            new_w = im_w * ratio
+            img = Resize((int(new_h), int(new_w)))(img)
+        return img
+
     def log_losses(self, loss_rgb, loss_occ, loss_reg, loss_total, time_spent):
         psnr = -10 * np.log(loss_rgb) / np.log(10)
         self.writer.add_scalar('psnr/train', psnr, self.niter)
@@ -199,11 +215,16 @@ class TrainerNuScenes:
 
     def set_optimizers(self):
         lr1, lr2 = self.get_learning_rate()
-        self.opts = torch.optim.AdamW([
-            {'params': self.model.parameters(), 'lr': lr1},
-            {'params': self.shape_codes.parameters(), 'lr': lr2},
-            {'params': self.texture_codes.parameters(), 'lr': lr2}
-        ])
+        if self.hpams['arch'] == 'autorf':
+            self.opts = torch.optim.AdamW([{'params': self.model.parameters(), 'lr': lr1}])
+        elif self.hpams['arch'] == 'codenerf':
+            self.opts = torch.optim.AdamW([
+                {'params': self.model.parameters(), 'lr': lr1},
+                {'params': self.shape_codes.parameters(), 'lr': lr2},
+                {'params': self.texture_codes.parameters(), 'lr': lr2}
+            ])
+        else:
+            print('ERROR: No valid network architecture is declared in config file!')
 
     def get_learning_rate(self):
         model_lr, latent_lr = self.hpams['lr_schedule'][0], self.hpams['lr_schedule'][1]
@@ -214,7 +235,12 @@ class TrainerNuScenes:
         return lr1, lr2
 
     def make_model(self):
-        self.model = CodeNeRF(**self.hpams['net_hyperparams']).to(self.device)
+        if self.hpams['arch'] == 'autorf':
+            self.model = AutoRF(**self.hpams['net_hyperparams']).to(self.device)
+        elif self.hpams['arch'] == 'codenerf':
+            self.model = CodeNeRF(**self.hpams['net_hyperparams']).to(self.device)
+        else:
+            print('ERROR: No valid network architecture is declared in config file!')
 
     def make_codes(self):
         d = len(self.instoken2idx.keys())
@@ -231,21 +257,26 @@ class TrainerNuScenes:
         self.shape_codes = self.shape_codes.to(self.device)
         self.texture_codes = self.texture_codes.to(self.device)
 
-    def load_pretrained_model_codes(self, saved_model_file):
-        saved_data = torch.load(saved_model_file, map_location = torch.device('cpu'))
+    def load_pretrained_model(self, saved_model_file):
+        saved_data = torch.load(saved_model_file, map_location=torch.device('cpu'))
         self.model.load_state_dict(saved_data['model_params'])
         self.model = self.model.to(self.device)
-        # mean shape should only consider those optimized codes when some of those are not touched
-        if 'optimized_idx' in saved_data.keys():
-            optimized_idx = saved_data['optimized_idx'].numpy()
-            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1, -1)
-            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1, -1)
-        else:
-            self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1,-1)
-            self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1,-1)
+
+        # load in previously optimized codes for codenerf
+        if self.hpams['arch'] == 'codenerf':
+            # mean shape should only consider those optimized codes when some of those are not touched
+            if 'optimized_idx' in saved_data.keys():
+                optimized_idx = saved_data['optimized_idx'].numpy()
+                self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'][optimized_idx > 0], dim=0).reshape(1,
+                                                                                                                          -1)
+                self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'][optimized_idx > 0],
+                                               dim=0).reshape(1, -1)
+            else:
+                self.mean_shape = torch.mean(saved_data['shape_code_params']['weight'], dim=0).reshape(1, -1)
+                self.mean_texture = torch.mean(saved_data['texture_code_params']['weight'], dim=0).reshape(1, -1)
 
     def make_savedir(self, save_dir):
-        self.save_dir = os.path.join(f'exps_nuscenes_codenerf', save_dir)
+        self.save_dir = os.path.join(f'exps_nuscenes_' + self.hpams['arch'], save_dir)
         if not os.path.isdir(self.save_dir):
             os.makedirs(os.path.join(self.save_dir, 'runs'))
         self.writer = SummaryWriter(os.path.join(self.save_dir, 'runs'))
@@ -254,14 +285,24 @@ class TrainerNuScenes:
             json.dump(self.hpams, f, indent=2)
 
     def save_models(self, iter=None, epoch=None):
-        save_dict = {'model_params': self.model.state_dict(),
-                     'shape_code_params': self.shape_codes.state_dict(),
-                     'texture_code_params': self.texture_codes.state_dict(),
-                     'niter': self.niter,
-                     'nepoch': self.nepoch,
-                     'instoken2idx': self.instoken2idx,
-                     'optimized_idx': self.optimized_idx
-                     }
+        if self.hpams['arch'] == 'autorf':
+            save_dict = {'model_params': self.model.state_dict(),
+                         'niter': self.niter,
+                         'nepoch': self.nepoch,
+                         }
+        elif self.hpams['arch'] == 'codenerf':
+            save_dict = {'model_params': self.model.state_dict(),
+                         'shape_code_params': self.shape_codes.state_dict(),
+                         'texture_code_params': self.texture_codes.state_dict(),
+                         'niter': self.niter,
+                         'nepoch': self.nepoch,
+                         'instoken2idx': self.instoken2idx,
+                         'optimized_idx': self.optimized_idx
+                         }
+        else:
+            save_dict = {}
+            print('ERROR: No valid network architecture is declared in config file!')
+
         if iter != None:
             torch.save(save_dict, os.path.join(self.save_dir, str(iter) + '.pth'))
         if epoch != None:
@@ -270,16 +311,16 @@ class TrainerNuScenes:
 
     def resume_from_epoch(self, saved_dir, epoch):
         print(f'Resume training from saved model at epoch {epoch}.')
-        saved_path = os.path.join('exps_nuscenes_codenerf', saved_dir, f'epoch_{epoch}.pth')
+        saved_path = os.path.join('exps_nuscenes_' + self.hpams['arch'], saved_dir, f'epoch_{epoch}.pth')
         saved_data = torch.load(saved_path, map_location=torch.device('cpu'))
 
         self.model.load_state_dict(saved_data['model_params'])
         self.model = self.model.to(self.device)
-        self.shape_codes.load_state_dict(saved_data['shape_code_params'])
-        self.texture_codes.load_state_dict(saved_data['texture_code_params'])
         self.niter = saved_data['niter'] + 1
         self.nepoch = saved_data['nepoch'] + 1
-        self.instoken2idx = saved_data['instoken2idx']
-        self.optimized_idx = saved_data['optimized_idx']
 
-
+        if self.hpams['arch'] == 'codenerf':
+            self.shape_codes.load_state_dict(saved_data['shape_code_params'])
+            self.texture_codes.load_state_dict(saved_data['texture_code_params'])
+            self.instoken2idx = saved_data['instoken2idx']
+            self.optimized_idx = saved_data['optimized_idx']

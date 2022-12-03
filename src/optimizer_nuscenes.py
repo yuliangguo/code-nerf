@@ -115,7 +115,7 @@ class OptimizerNuScenes:
             else:
                 shapecode = None
                 texturecode = None
-                print('No valid network architecture is declared!')
+                print('ERROR: No valid network architecture is declared in config file!')
 
             # First Optimize
             self.nopts = 0
@@ -145,8 +145,6 @@ class OptimizerNuScenes:
                     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
                                        torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                # loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                 loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                 loss.backward()
                 loss_per_img.append(loss_rgb.detach().item())
@@ -250,7 +248,7 @@ class OptimizerNuScenes:
             else:
                 shapecode = None
                 texturecode = None
-                print('No valid network architecture is declared!')
+                print('ERROR: No valid network architecture is declared in config file!')
 
             # set pose parameters
             rot_mat_vec = pred_poses[:, :3, :3]
@@ -302,8 +300,6 @@ class OptimizerNuScenes:
                     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
                                        torch.sum(torch.abs(occ_pixels)) + 1e-9)
                 # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                # loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                 loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
 
                 if self.hpams['obj_sz_reg']:
@@ -353,7 +349,6 @@ class OptimizerNuScenes:
                 self.nopts += 1
                 if self.nopts % self.hpams['optimize']['lr_half_interval'] == 0:
                     self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec)
-                    # self.set_optimizers_w_poses_model(shapecode, texturecode, rot_vec, trans_vec)
 
             # Save the optimized codes
             self.optimized_shapecodes[instoken] = shapecode.detach().cpu()
@@ -373,12 +368,6 @@ class OptimizerNuScenes:
         # Per object
         for obj_idx, instoken in enumerate(instokens):
             print(f'num obj: {obj_idx}/{len(instokens)}, instoken: {instoken}')
-
-            # tgt_imgs, masks_occ, rois, cam_intrinsics, tgt_poses, anntokens = self.nusc_dataset.get_ins_samples(
-            #     instoken)
-            #
-            # if tgt_imgs is None:
-            #     continue
 
             batch_data = self.nusc_dataset.get_ins_samples(instoken)
 
@@ -426,7 +415,7 @@ class OptimizerNuScenes:
             else:
                 shapecode = None
                 texturecode = None
-                print('No valid network architecture is declared!')
+                print('ERROR: No valid network architecture is declared in config file!')
 
             # Optimize
             self.nopts = 0
@@ -469,8 +458,6 @@ class OptimizerNuScenes:
                         torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
                                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    # loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                     loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
@@ -578,7 +565,7 @@ class OptimizerNuScenes:
             else:
                 shapecode = None
                 texturecode = None
-                print('No valid network architecture is declared!')
+                print('ERROR: No valid network architecture is declared in config file!')
 
             # set pose parameters
             rot_mat_vec = pred_poses[:, :3, :3]
@@ -643,8 +630,6 @@ class OptimizerNuScenes:
                         torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
                                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
                     # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                    # loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ + self.hpams['loss_reg_coef'] * loss_reg
-                    # loss = loss_rgb + self.hpams['loss_reg_coef'] * loss_reg
                     loss = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
                     loss.backward()
                     loss_per_img.append(loss_rgb.detach().item())
@@ -783,7 +768,6 @@ class OptimizerNuScenes:
     def save_img(self, generated_imgs, gt_imgs, masks_occ, obj_id, instance_num):
         # H, W = gt_imgs[0].shape[:2]
         W_tgt = np.min([gt_img.shape[1] for gt_img in gt_imgs])
-        # nviews = len(gt_imgs)
 
         if len(gt_imgs) > 1:
             # Align the width of different-sized images
@@ -803,12 +787,10 @@ class OptimizerNuScenes:
         save_img_dir = os.path.join(self.save_dir, obj_id)
         if not os.path.isdir(save_img_dir):
             os.makedirs(save_img_dir)
-        # imageio.imwrite(os.path.join(save_img_dir, 'opt' + self.nviews + '_{:03d}'.format(instance_num) + '.png'), ret)
         imageio.imwrite(os.path.join(save_img_dir, 'opt' + '{:03d}'.format(instance_num) + '.png'), ret)
 
     def save_virtual_img(self, imgs, obj_id, instance_num=None):
         H, W = imgs[0].shape[:2]
-        # nviews = len(gt_imgs)
 
         img_out = torch.cat(imgs).reshape(-1, W, 3)
         img_out = image_float_to_uint8(img_out.detach().cpu().numpy())
@@ -821,7 +803,7 @@ class OptimizerNuScenes:
         else:
             imageio.imwrite(os.path.join(save_img_dir, 'virt_opt' + '{:03d}'.format(instance_num) + '.png'), img_out)
 
-    def log_compute_ssim(self, generated_img, gt_img, niters, obj_idx):
+    def log_compute_ssim(self, generated_img, gt_img, obj_idx):
         generated_img_np = generated_img.detach().cpu().numpy()
         gt_img_np = gt_img.detach().cpu().numpy()
         ssim = compute_ssim(generated_img_np, gt_img_np, multichannel=True)
@@ -840,7 +822,7 @@ class OptimizerNuScenes:
             self.psnr_eval[obj_idx].append(psnr)
 
     def log_eval_pose(self, est_poses, tgt_poses, ann_tokens):
-        # convert back to object pose to evaluaate
+        # convert back to object pose to evaluate
         est_R = est_poses[:, :3, :3].transpose(-1, -2)
         est_T = -torch.matmul(est_R, est_poses[:, :3, 3:]).squeeze(-1)
         tgt_R = tgt_poses[:, :3, :3].transpose(-1, -2)
@@ -882,7 +864,7 @@ class OptimizerNuScenes:
         elif self.hpams['arch'] == 'codenerf':
             self.model = CodeNeRF(**self.hpams['net_hyperparams']).to(self.device)
         else:
-            print('No valid network architecture is declared!')
+            print('ERROR: No valid network architecture is declared in config file!')
 
     def load_model(self):
         saved_dir = self.hpams['model_dir']

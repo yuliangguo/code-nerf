@@ -5,8 +5,7 @@ import argparse
 import json
 from datetime import date
 
-from src.trainer_codenerf_nuscenes import TrainerNuScenes
-from src.trainer_autorf_nuscenes import TrainerAutoRFNuScenes
+from src.trainer_nuscenes import TrainerNuScenes
 from src.data_nuscenes import NuScenesData
 
 
@@ -48,14 +47,9 @@ if __name__ == '__main__':
     )
 
     # create trainer
-    if 'autorf' in args.config_file:
-        trainer = TrainerAutoRFNuScenes(save_dir, args.gpu, nusc_dataset,
-                                        args.pretrained_model_dir, args.resume_from_epoch, args.config_file,
-                                        args.batch_size, num_workers=args.num_workers, shuffle=True)
-    else:
-        trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
-                                  args.pretrained_model_dir, args.resume_from_epoch, args.config_file, args.batch_size,
-                                  num_workers=args.num_workers, shuffle=True)
+    trainer = TrainerNuScenes(save_dir, args.gpu, nusc_dataset,
+                              args.pretrained_model_dir, args.resume_from_epoch, args.config_file,
+                              args.batch_size, num_workers=args.num_workers, shuffle=True)
 
     # training
-    trainer.training(args.epochs)
+    trainer.train(args.epochs)
