@@ -281,6 +281,8 @@ class TrainerNuScenes:
             os.makedirs(os.path.join(self.save_dir, 'runs'))
         self.writer = SummaryWriter(os.path.join(self.save_dir, 'runs'))
         hpampath = os.path.join(self.save_dir, 'hpam.json')
+        # update the model folder
+        self.hpams['model_dir'] = self.save_dir
         with open(hpampath, 'w') as f:
             json.dump(self.hpams, f, indent=2)
 

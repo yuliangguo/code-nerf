@@ -255,25 +255,6 @@ def get_tgt_ins_from_pred(preds, masks, tgt_cat, tgt_box):
 
 
 # TODO: make an initial pre-process save all the valid cases?
-# class NuScenesData:
-#     def __init__(self, nusc_cat='vehicle.car',
-#                  seg_cat='car',
-#                  nusc_data_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini',
-#                  nusc_seg_dir='/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini/pred_panoptic',
-#                  nusc_version='v1.0-mini',
-#                  split='train',
-#                  num_cams_per_sample=1,
-#                  divisor=1000,
-#                  box_iou_th=0.5,
-#                  max_dist=40,
-#                  mask_pixels=10000,
-#                  img_h=900,
-#                  img_w=1600,
-#                  add_pose_err=False,
-#                  max_rot_pert=0.2,
-#                  max_t_pert=0.1,
-#                  debug=False,
-#                  ):
 class NuScenesData:
     def __init__(self, hpams,
                  nusc_data_dir,
@@ -390,7 +371,6 @@ class NuScenesData:
         cam_poses_w_err = []
         obj_poses_w_err = []
 
-        # TODO: apply different parsing depending on the segmentation type
         # For each annotation (one annotation per timestamp) get all the sensors
         sample_ann = self.nusc.get('sample_annotation', anntoken)
         sample_record = self.nusc.get('sample', sample_ann['sample_token'])
@@ -727,25 +707,29 @@ if __name__ == '__main__':
     from torch.utils.data import DataLoader
     from nuimages import NuImages
 
-    # nuim = NuImages(dataroot='/mnt/LinuxDataFast/Datasets/nuimages', version='v1.0-train', verbose=True, lazy=True)
+    # Read Hyper-parameters
+    with open('jsonfiles/autorf.nusc.vehicle.car.json', 'r') as f:
+        hpams = json.load(f)
+
+    nusc_data_dir = hpams['dataset']['test_data_dir']
+    nusc_seg_dir = os.path.join(nusc_data_dir, 'pred_instance')
+    nusc_version = hpams['dataset']['test_nusc_version']
 
     nusc_dataset = NuScenesData(
-        nusc_cat='vehicle.car',
-        seg_cat='car',
-        nusc_data_dir='/media/yuliangguo/data_ssd_4tb/Datasets/nuscenes/v1.0-trainval',
-        nusc_seg_dir='/media/yuliangguo/data_ssd_4tb/Datasets/nuscenes/v1.0-trainval/pred_instance',
-        nusc_version='v1.0-trainval',
+        hpams,
+        nusc_data_dir,
+        nusc_seg_dir,
+        nusc_version,
         split='val',
         num_cams_per_sample=1,
-        divisor=1000,
-        box_iou_th=0.6,
-        mask_pixels=2500,
-        img_h=900,
-        img_w=1600,
-        debug=True)
+        debug=True,
+        add_pose_err=False
+    )
+
     dataloader = DataLoader(nusc_dataset, batch_size=1, num_workers=0, shuffle=True)
 
     # # Check the overlap of nuscenes and nuimages
+    # nuim = NuImages(dataroot='/mnt/LinuxDataFast/Datasets/nuimages', version='v1.0-train', verbose=True, lazy=True)
     # for ii, anntoken in enumerate(nusc_dataset.anntokens):
     #     sample_ann = nusc_dataset.nusc.get('sample_annotation', anntoken)
     #     try:

@@ -18,9 +18,6 @@ from model_codenerf import CodeNeRF
 class OptimizerNuScenes:
     def __init__(self, gpu, nusc_dataset, hpams,
                  save_postfix='_nuscenes', num_workers=0, shuffle=False):
-        """
-
-        """
         super().__init__()
         self.hpams = hpams
         self.save_postfix = save_postfix
@@ -153,7 +150,8 @@ class OptimizerNuScenes:
                 gt_masks_occ.append(masks_occ[0, roi[1]:roi[3], roi[0]:roi[2]])
                 self.opts.step()
 
-                # Just use the cropped region instead to save computation on the visualization
+                # Just render the cropped region instead to save computation on the visualization
+                # ATTENTION: the optimizing parameters are updated, but intermediate variables are not
                 if save_img or self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                     # generate the full images
                     generated_imgs = []
@@ -258,7 +256,7 @@ class OptimizerNuScenes:
             else:
                 rot_vec = rot_trans.matrix_to_axis_angle(rot_mat_vec).to(self.device).detach().requires_grad_()
 
-            # First Optimize
+            # Optimization
             self.nopts = 0
             self.set_optimizers_w_poses(shapecode, texturecode, rot_vec, trans_vec)
             est_cams = torch.zeros((1, 3, 4), dtype=torch.float32)
@@ -320,8 +318,8 @@ class OptimizerNuScenes:
                     print('   Final R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 self.opts.step()
 
-                # Just use the cropped region instead to save computation on the visualization
-                # ATTENTION: the first visual is already after one iter of optimization
+                # Just render the cropped region instead to save computation on the visualization
+                # ATTENTION: the optimizing parameters are updated, but intermediate variables are not
                 if save_img or self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                     # generate the full images
                     generated_imgs = []
@@ -470,6 +468,7 @@ class OptimizerNuScenes:
                 self.opts.step()
 
                 # Just render the cropped region instead to save computation on the visualization
+                # ATTENTION: the optimizing parameters are updated, but intermediate variables are not
                 if save_img or self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                     # generate the full images
                     generated_imgs = []
@@ -647,6 +646,7 @@ class OptimizerNuScenes:
                 self.opts.step()
 
                 # Just render the cropped region instead to save computation on the visualization
+                # ATTENTION: the optimizing parameters are updated, but intermediate variables are not
                 if save_img or self.nopts == 0 or self.nopts == (self.hpams['optimize']['num_opts'] - 1):
                     # generate the full images
                     generated_imgs = []
@@ -859,6 +859,7 @@ class OptimizerNuScenes:
         self.hpams['optimize']['lr_pose'] = self.hpams['optimize']['lr_pose'] * 2**(-opt_values)
 
     def make_model(self):
+        # TODO: should the net_hyperparams respect to the save hpam file in the trained model folder
         if self.hpams['arch'] == 'autorf':
             self.model = AutoRF(**self.hpams['net_hyperparams']).to(self.device)
         elif self.hpams['arch'] == 'codenerf':
