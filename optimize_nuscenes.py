@@ -13,7 +13,7 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--config_file", dest="config_file", default="exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_11_23/hpam.json")
+    arg_parser.add_argument("--config_file", dest="config_file", default="exps_nuscenes_codenerf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_10_06/hpam.json")
     arg_parser.add_argument("--seg_source", dest="seg_source", default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--save_img", dest="save_img", default=False)
@@ -68,13 +68,13 @@ if __name__ == '__main__':
     # eval summary
     psnr_all = []
     for psnr in optimizer.psnr_eval.values():
-        psnr_all.append(psnr[0].squeeze().numpy())
+        psnr_all.append(psnr[0])
     print(f'Avg psnr error: {np.mean(np.array(psnr_all))}')
     if args.opt_pose:
         R_err_all = []
         T_err_all = []
         for R_err in optimizer.R_eval.values():
-            R_err_all.append(R_err[0].squeeze().numpy())
+            R_err_all.append(R_err.numpy())
         for T_err in optimizer.T_eval.values():
-            T_err_all.append(T_err[0].squeeze().numpy())
+            T_err_all.append(T_err.numpy())
         print(f'Avg R error: {np.mean(np.array(R_err_all))}, Avg T error: {np.mean(np.array(T_err_all))}')
