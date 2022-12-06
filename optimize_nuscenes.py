@@ -3,6 +3,7 @@ ROOT_DIR = os.path.abspath(os.path.join('', 'src'))
 sys.path.insert(0, os.path.join(ROOT_DIR))
 import argparse
 import json
+import numpy as np
 
 from src.utils import str2bool
 from src.optimizer_nuscenes import OptimizerNuScenes
@@ -64,4 +65,16 @@ if __name__ == '__main__':
         else:
             optimizer.optimize_objs(str2bool(args.save_img))
 
-    # TODO: calculate the eval scores
+    # eval summary
+    psnr_all = []
+    for psnr in optimizer.psnr_eval.values():
+        psnr_all.append(psnr[0].squeeze().numpy())
+    print(f'Avg psnr error: {np.mean(np.array(psnr_all))}')
+    if args.opt_pose:
+        R_err_all = []
+        T_err_all = []
+        for R_err in optimizer.R_eval.values():
+            R_err_all.append(R_err[0].squeeze().numpy())
+        for T_err in optimizer.T_eval.values():
+            T_err_all.append(T_err[0].squeeze().numpy())
+        print(f'Avg R error: {np.mean(np.array(R_err_all))}, Avg T error: {np.mean(np.array(T_err_all))}')

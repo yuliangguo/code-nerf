@@ -148,6 +148,8 @@ class OptimizerNuScenes:
                 # Different roi sizes are dealt in save_image later
                 gt_imgs.append(tgt_imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                 gt_masks_occ.append(masks_occ[0, roi[1]:roi[3], roi[0]:roi[2]])
+                if self.nopts == self.hpams['optimize']['num_opts'] - 1:
+                    self.log_eval_psnr(loss_per_img, batch_data['anntoken'])
                 self.opts.step()
 
                 # Just render the cropped region instead to save computation on the visualization
@@ -273,6 +275,8 @@ class OptimizerNuScenes:
                 else:
                     rot_mat2opt = rot_trans.axis_angle_to_matrix(rot_vec[0])
 
+                # TODO: this is the only difference when optimizing in the two different frames, why the optimization results are so different?
+                #  Difference due to numerical error? The paths are different so trapped in different local minimals?
                 if self.hpams['optimize']['opt_obj_pose']:
                     rot_mat2opt = torch.transpose(rot_mat2opt, dim0=-2, dim1=-1)
                     t2opt = -rot_mat2opt @ t2opt
@@ -316,6 +320,7 @@ class OptimizerNuScenes:
                     print('   Initial R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 if self.nopts == self.hpams['optimize']['num_opts'] - 1:
                     print('   Final R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
+                    self.log_eval_psnr(loss_per_img, batch_data['anntoken'])
                 self.opts.step()
 
                 # Just render the cropped region instead to save computation on the visualization
@@ -464,7 +469,8 @@ class OptimizerNuScenes:
                     gt_imgs.append(tgt_imgs[num, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                     gt_masks_occ.append(masks_occ[num, roi[1]:roi[3], roi[0]:roi[2]])
                     self.optimized_ann_flag[anntokens[num]] = 1
-
+                if self.nopts == self.hpams['optimize']['num_opts'] - 1:
+                    self.log_eval_psnr(loss_per_img, anntokens)
                 self.opts.step()
 
                 # Just render the cropped region instead to save computation on the visualization
@@ -643,6 +649,7 @@ class OptimizerNuScenes:
                     print('    Initial R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 if self.nopts == self.hpams['optimize']['num_opts'] - 1:
                     print('    Final R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
+                    self.log_eval_psnr(loss_per_img, anntokens)
                 self.opts.step()
 
                 # Just render the cropped region instead to save computation on the visualization
@@ -803,23 +810,25 @@ class OptimizerNuScenes:
         else:
             imageio.imwrite(os.path.join(save_img_dir, 'virt_opt' + '{:03d}'.format(instance_num) + '.png'), img_out)
 
-    def log_compute_ssim(self, generated_img, gt_img, obj_idx):
-        generated_img_np = generated_img.detach().cpu().numpy()
-        gt_img_np = gt_img.detach().cpu().numpy()
-        ssim = compute_ssim(generated_img_np, gt_img_np, multichannel=True)
-        # if niters == 0:
-        if self.ssim_eval.get(obj_idx) is None:
-            self.ssim_eval[obj_idx] = [ssim]
-        else:
-            self.ssim_eval[obj_idx].append(ssim)
+    def log_compute_ssim(self, generated_imgs, gt_imgs, ann_tokens):
+        # ATTENTION: preparing all generated_imgs is time-consuming for evaluation purpose
+        for i, ann_token in enumerate(ann_tokens):
+            generated_img_np = generated_imgs[i].detach().cpu().numpy()
+            gt_img_np = gt_imgs[i].detach().cpu().numpy()
+            ssim = compute_ssim(generated_img_np, gt_img_np, multichannel=True)
+            if self.ssim_eval.get(ann_token) is None:
+                self.ssim_eval[ann_token] = [ssim]
+            else:
+                self.ssim_eval[ann_token].append(ssim)
 
-    def log_eval_psnr(self, loss_per_img, obj_idx):
-        psnr = -10 * np.log(loss_per_img) / np.log(10)
-        # if niters == 0:
-        if self.psnr_eval.get(obj_idx) is None:
-            self.psnr_eval[obj_idx] = [psnr]
-        else:
-            self.psnr_eval[obj_idx].append(psnr)
+    def log_eval_psnr(self, loss_per_img, ann_tokens):
+        # ATTENTION: the loss_per_img including BG can make the value lower than reported in paper
+        for i, ann_token in enumerate(ann_tokens):
+            psnr = -10 * np.log(loss_per_img[i]) / np.log(10)
+            if self.psnr_eval.get(ann_token) is None:
+                self.psnr_eval[ann_token] = [psnr]
+            else:
+                self.psnr_eval[ann_token].append(psnr)
 
     def log_eval_pose(self, est_poses, tgt_poses, ann_tokens):
         # convert back to object pose to evaluate
@@ -834,7 +843,6 @@ class OptimizerNuScenes:
         for i, ann_token in enumerate(ann_tokens):
             self.R_eval[ann_token] = err_R[i]
             self.T_eval[ann_token] = err_T[i]
-            # print(f'    R_error: {self.R_eval[ann_token]}, T_error: {self.T_eval[ann_token]}')
 
     def set_optimizers(self, shapecode, texturecode):
         self.update_learning_rate()

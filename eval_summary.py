@@ -6,6 +6,10 @@ if __name__ == '__main__':
 
     saved_result = torch.load(result_file, map_location=torch.device('cpu'))
 
+    psnr_all = []
+    for psnr in saved_result['psnr_eval'].values():
+        psnr_all.append(psnr[0].squeeze().numpy())
+
     R_err_all = []
     T_err_all = []
     for R_err in saved_result['R_eval'].values():
