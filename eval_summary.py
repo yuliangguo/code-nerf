@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 if __name__ == '__main__':
-    result_file = 'exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize10_2022_11_23/test_nuscenes_use_instance_opt_pose_2/codes+poses.pth'
+    result_file = 'exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize6_2022_12_02/test_nuscenes_use_instance_opt_pose_full/codes+poses.pth'
 
     saved_result = torch.load(result_file, map_location=torch.device('cpu'))
 
