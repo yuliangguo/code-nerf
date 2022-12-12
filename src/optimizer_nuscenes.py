@@ -867,7 +867,6 @@ class OptimizerNuScenes:
         self.hpams['optimize']['lr_pose'] = self.hpams['optimize']['lr_pose'] * 2**(-opt_values)
 
     def make_model(self):
-        # TODO: should the net_hyperparams respect to the save hpam file in the trained model folder
         if self.hpams['arch'] == 'autorf':
             self.model = AutoRF(**self.hpams['net_hyperparams']).to(self.device)
         elif self.hpams['arch'] == 'codenerf':
