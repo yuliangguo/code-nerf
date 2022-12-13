@@ -24,14 +24,17 @@ if __name__ == '__main__':
     X_o_gt = R_c2o_gt @ X_c + T_c2o_gt
 
     # pred pose
+    ratio = 1.2
     rot_vec_o2c_pred = torch.tensor([0.2, 0.5, 0.8], dtype=torch.float32).detach().requires_grad_()
-    trans_vec_o2c_pred = torch.tensor([0, 0, 1], dtype=torch.float32).detach().requires_grad_()
+    trans_vec_o2c_pred = torch.tensor([20*ratio, 5*ratio, 1*ratio], dtype=torch.float32).detach().requires_grad_()
+    # trans_vec_o2c_pred = 0.8 * trans_vec_o2c_gt.clone().detach().requires_grad_()
     R_o2c_pred = rot_trans.axis_angle_to_matrix(rot_vec_o2c_pred)
     T_o2c_pred = trans_vec_o2c_pred.unsqueeze(-1)
     R_c2o_pred = torch.transpose(R_o2c_pred, dim0=-2, dim1=-1)
     T_c2o_pred = - R_c2o_pred @ T_o2c_pred
     rot_vec_c2o_pred = rot_trans.matrix_to_axis_angle(R_c2o_pred).detach().requires_grad_()
-    trans_vec_c2o_pred = T_c2o_pred.squeeze().detach().requires_grad_()
+    # trans_vec_c2o_pred = T_c2o_pred.squeeze().detach().requires_grad_()
+    trans_vec_c2o_pred = torch.tensor([-15.0134*ratio,  14.1279*ratio,  -1.0000*ratio], dtype=torch.float32).detach().requires_grad_()
 
     lr_rot = 0.001
     lr_trans = 0.01
@@ -58,7 +61,7 @@ if __name__ == '__main__':
     print(f'iter: 0, loss1: Inf, rot_vec_o2c_gt: {rot_vec_o2c_gt}, rot_vec_o2c_pred: {rot_vec_o2c_pred}, trans_vec_o2c_gt: {trans_vec_o2c_gt}, trans_vec_o2c_pred: {trans_vec_o2c_pred}')
     print(f'iter: 0, loss2: inf, rot_vec_c2o_gt: {rot_vec_c2o_gt}, rot_vec_c2o_pred: {rot_vec_c2o_pred}, trans_vec_c2o_gt: {trans_vec_c2o_gt}, trans_vec_c2o_pred: {trans_vec_c2o_pred}')
 
-    for iter in range(0, 1):
+    for iter in range(0, 100):
         rot_vec_o2c_pred.retain_grad()
         trans_vec_o2c_pred.retain_grad()
         rot_vec_c2o_pred.retain_grad()
