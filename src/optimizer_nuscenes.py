@@ -275,8 +275,6 @@ class OptimizerNuScenes:
                 else:
                     rot_mat2opt = rot_trans.axis_angle_to_matrix(rot_vec[0])
 
-                # TODO: this is the only difference when optimizing in the two different frames, why the optimization results are so different?
-                #  Difference due to numerical error? The paths are different so trapped in different local minimals?
                 if self.hpams['optimize']['opt_obj_pose']:
                     rot_mat2opt = torch.transpose(rot_mat2opt, dim0=-2, dim1=-1)
                     t2opt = -rot_mat2opt @ t2opt

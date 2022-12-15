@@ -4,6 +4,9 @@ import pytorch3d.transforms.rotation_conversions as rot_trans
 
 if __name__ == '__main__':
 
+    # initial error could from o2c or c2o
+    init_error_from_c2o = True
+
     # points in camera coordinates
     X_c = np.asarray([[1, 5, 10],
                       [2, -4, 8],
@@ -27,14 +30,17 @@ if __name__ == '__main__':
     ratio = 1.2
     rot_vec_o2c_pred = torch.tensor([0.2, 0.5, 0.8], dtype=torch.float32).detach().requires_grad_()
     trans_vec_o2c_pred = torch.tensor([20*ratio, 5*ratio, 1*ratio], dtype=torch.float32).detach().requires_grad_()
-    # trans_vec_o2c_pred = 0.8 * trans_vec_o2c_gt.clone().detach().requires_grad_()
+    # trans_vec_o2c_pred = ratio * trans_vec_o2c_gt.clone().detach().requires_grad_()
     R_o2c_pred = rot_trans.axis_angle_to_matrix(rot_vec_o2c_pred)
     T_o2c_pred = trans_vec_o2c_pred.unsqueeze(-1)
     R_c2o_pred = torch.transpose(R_o2c_pred, dim0=-2, dim1=-1)
     T_c2o_pred = - R_c2o_pred @ T_o2c_pred
     rot_vec_c2o_pred = rot_trans.matrix_to_axis_angle(R_c2o_pred).detach().requires_grad_()
-    # trans_vec_c2o_pred = T_c2o_pred.squeeze().detach().requires_grad_()
-    trans_vec_c2o_pred = torch.tensor([-15.0134*ratio,  14.1279*ratio,  -1.0000*ratio], dtype=torch.float32).detach().requires_grad_()
+    trans_vec_c2o_pred = T_c2o_pred.squeeze().detach().requires_grad_()
+    if init_error_from_c2o:
+        trans_vec_c2o_pred = torch.tensor([-15.0134*ratio,  14.1279*ratio,  -1.0000*ratio], dtype=torch.float32).detach().requires_grad_()
+        trans_vec_o2c_pred = -R_o2c_pred @ trans_vec_c2o_pred.unsqueeze(-1)
+        trans_vec_o2c_pred = trans_vec_o2c_pred.squeeze().detach().requires_grad_()
 
     lr_rot = 0.001
     lr_trans = 0.01
