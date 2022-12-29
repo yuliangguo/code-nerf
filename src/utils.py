@@ -21,13 +21,13 @@ def get_rays_srn(H, W, focal, c2w):
 
 def get_rays(K, c2w, roi):
     """
-    K: intrinsic matrix
-    c2w: camera pose in object (world) coordinate frame
-    roi: [min_x, min_y, max_x, max_y]
+        K: intrinsic matrix
+        c2w: camera pose in object (world) coordinate frame
+        roi: [min_x, min_y, max_x, max_y]
 
-    ATTENTION:
-    the number of output rays depends on roi inputs
-    nuscenes uses a different camera coordinate frame compared to shapenet srn
+        ATTENTION:
+        the number of output rays depends on roi inputs
+        nuscenes uses a different camera coordinate frame compared to shapenet srn
     """
     dx = K[0, 2]
     dy = K[1, 2]
@@ -92,7 +92,52 @@ def volume_rendering2(sigmas, rgbs, z_vals):
     return rgb_final, depth_final, accum_trans[:, -1]
 
 
+def prepare_pixel_samples(img, mask_occ, cam_pose, obj_diag, K, roi, n_rays, n_samples, shapenet_obj_cood, sym_aug):
+    """
+        Prepare pixel-sampled data from input image
+    """
+    # near and far sample range need to be adaptively calculated
+    near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
+    far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
+
+    rays_o, viewdir = get_rays(K, cam_pose, roi)
+
+    # For different sized roi, extract a random subset of pixels with fixed batch size
+    n_rays = np.minimum(rays_o.shape[0], n_rays)
+    random_ray_ids = np.random.permutation(rays_o.shape[0])[:n_rays]
+    rays_o = rays_o[random_ray_ids]
+    viewdir = viewdir[random_ray_ids]
+
+    # extract samples
+    rgb_tgt = img.reshape(-1, 3)[random_ray_ids]
+    occ_pixels = mask_occ.reshape(-1, 1)[random_ray_ids]
+    mask_rgb = torch.clone(mask_occ)
+    mask_rgb[mask_rgb < 0] = 0
+
+    xyz, viewdir, z_vals = sample_from_rays(rays_o, viewdir, near, far, n_samples)
+    xyz /= obj_diag
+
+    # Apply symmetric augmentation
+    if sym_aug and random.uniform(0, 1) > 0.5:
+        xyz[:, :, 1] *= (-1)
+        viewdir[:, :, 1] *= (-1)
+
+    # Nuscene to ShapeNet: frame rotate -90 degree around Z, coord rotate 90 degree around Z
+    if shapenet_obj_cood:
+        xyz = xyz[:, :, [1, 0, 2]]
+        xyz[:, :, 0] *= (-1)
+        viewdir = viewdir[:, :, [1, 0, 2]]
+        viewdir[:, :, 0] *= (-1)
+
+    return xyz, viewdir, z_vals, rgb_tgt, occ_pixels
+
+
 def render_rays(model, device, img, mask_occ, cam_pose, obj_diag, K, roi, n_rays, n_samples, shapecode, texturecode, shapenet_obj_cood, sym_aug):
+    """
+        Assume only one input image, sample pixels from the roi area, and render rgb and depth values of the sampled pixels.
+        Return both rendered values and tgt values for the sampled pixels, as well additional output for training purpose
+    """
+    
     # near and far sample range need to be adaptively calculated
     near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2
     far = np.linalg.norm(cam_pose[:, -1].tolist()) + obj_diag / 2
@@ -134,6 +179,10 @@ def render_rays(model, device, img, mask_occ, cam_pose, obj_diag, K, roi, n_rays
 
 
 def render_full_img(model, device, cam_pose, obj_sz, K, roi, n_samples, shapecode, texturecode, shapenet_obj_cood, debug_occ=False):
+    """
+        Assume only one input image, render rgb and depth values of the all the image pixels within the roi area.
+        Only the rendered image is returned for visualization purpose.
+    """
     obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
     # near and far sample range need to be adaptively calculated
@@ -176,6 +225,9 @@ def render_full_img(model, device, cam_pose, obj_sz, K, roi, n_samples, shapecod
 
 
 def render_virtual_imgs(model, device, obj_sz, K, n_samples, shapecode, texturecode, shapenet_obj_cood, radius=40., tilt=np.pi/6, pan_num=8, img_sz=128):
+    """
+        Given NeRF model and conditioned shapecode and texturecode, render a set of virtual images from different views
+    """
     virtual_imgs = []
     x_min = K[0, 2] - img_sz/2
     x_max = K[0, 2] + img_sz/2

@@ -5,7 +5,8 @@ import argparse
 import json
 from datetime import date
 
-from src.trainer_nuscenes import TrainerNuScenes
+# from src.trainer_nuscenes import TrainerNuScenes
+from src.trainer_nuscenes_multi_gpu import TrainerNuScenes
 from src.data_nuscenes import NuScenesData
 
 

@@ -9,10 +9,47 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import Resize
 
-from utils import image_float_to_uint8, render_rays, render_full_img
+from utils import image_float_to_uint8, render_rays, render_full_img, prepare_pixel_samples
 from model_autorf import AutoRF
 from model_codenerf import CodeNeRF
 
+
+class ParallelModel(nn.Module):
+    def __init__(self, model=None, hpams=None):
+        super().__init__()
+        self.model = model
+        self.hpams = hpams
+    
+    # TODO: the batch for encoder is at image level, but the batch size for the decoder is at ray level (can the ray samples from different image samples be directly concatenated to distribute)
+    def forward(self,
+                img_in,
+                device,
+                tgt_img,
+                mask_occ,
+                tgt_pose,
+                obj_diag,
+                K,
+                roi):
+        shapecode, texturecode = self.model.encode_img(img_in)
+        # render ray values and prepare target rays
+        rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, device,
+                                                                                tgt_img, mask_occ, tgt_pose,
+                                                                                obj_diag, K, roi,
+                                                                                self.hpams['n_rays'],
+                                                                                self.hpams['n_samples'],
+                                                                                shapecode, texturecode,
+                                                                                self.hpams['shapenet_obj_cood'],
+                                                                                self.hpams['sym_aug'])
+        
+        loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
+                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
+        # Occupancy loss
+        loss_occ = torch.sum(
+            torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
+        loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+        loss_total = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+        
 
 class TrainerNuScenes:
     def __init__(self, save_dir, gpu, nusc_dataset, pretrained_model_dir=None, resume_from_epoch=None, jsonfile='srncar.json', batch_size=2,
@@ -68,6 +105,15 @@ class TrainerNuScenes:
         self.set_optimizers()
         self.opts.zero_grad()
         self.t1 = time.time()
+        
+        self.img_in_batch = []
+        self.shapecode_batch = []
+        self.texturecode_batch = []
+        self.xyz_batch = []
+        self.viewdir_batch = []
+        self.z_vals_batch = []
+        self.gb_tgt_batch = []
+        self.occ_pixels_batch = []
 
         while self.nepoch < epochs:
             print(f'epoch: {self.nepoch}')
@@ -84,8 +130,8 @@ class TrainerNuScenes:
         cam_id = 0
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
+            # TODO: current data loader only load one image data per batch, so the real batch needs manual accumulation
             for obj_idx, imgs in enumerate(batch_data['imgs']):
-
                 masks_occ = batch_data['masks_occ'][obj_idx]
                 rois = batch_data['rois'][obj_idx]
                 cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
@@ -94,6 +140,7 @@ class TrainerNuScenes:
                 instoken = batch_data['instoken'][obj_idx]
                 anntoken = batch_data['anntoken'][obj_idx]
 
+                # TODO: preprocess of the dataset to only keep the valid sample
                 # skip unqualified sample
                 if np.sum(valid_flags.numpy()) == 0:
                     continue
@@ -118,43 +165,69 @@ class TrainerNuScenes:
                 tgt_img = tgt_img * (mask_occ > 0)
                 tgt_img = tgt_img + (mask_occ < 0)
 
-                if self.hpams['arch'] == 'autorf':
-                    # preprocess image and predict shapecode and texturecode
-                    img_in = self.preprocess_img(tgt_img)
-                    shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
-                elif self.hpams['arch'] == 'codenerf':
-                    code_idx = self.instoken2idx[instoken]
-                    code_idx = torch.as_tensor(code_idx).to(self.device)
-                    shapecode = self.shape_codes(code_idx).unsqueeze(0)
-                    texturecode = self.texture_codes(code_idx).unsqueeze(0)
-                    self.optimized_idx[code_idx.item()] = 1
-                else:
-                    shapecode = None
-                    texturecode = None
-                    print('ERROR: No valid network architecture is declared in config file!')
+                # if self.hpams['arch'] == 'autorf':
+                #     # preprocess image and predict shapecode and texturecode
+                #     img_in = self.preprocess_img(tgt_img)
+                #     shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
+                # elif self.hpams['arch'] == 'codenerf':
+                #     code_idx = self.instoken2idx[instoken]
+                #     code_idx = torch.as_tensor(code_idx).to(self.device)
+                #     shapecode = self.shape_codes(code_idx)
+                #     texturecode = self.texture_codes(code_idx)
+                #     self.optimized_idx[code_idx.item()] = 1
+                # else:
+                #     shapecode = None
+                #     texturecode = None
+                #     print('ERROR: No valid network architecture is declared in config file!')
 
-                # render ray values and prepare target rays
-                rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
-                                                                                        tgt_img, mask_occ, tgt_pose,
-                                                                                        obj_diag, K, roi,
-                                                                                        self.hpams['n_rays'],
-                                                                                        self.hpams['n_samples'],
-                                                                                        shapecode, texturecode,
-                                                                                        self.hpams['shapenet_obj_cood'],
-                                                                                        self.hpams['sym_aug'])
-                # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
-                loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
-                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
-                # Occupancy loss
-                loss_occ = torch.sum(
-                    torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
-                                   torch.sum(torch.abs(occ_pixels)) + 1e-9)
-                loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
-                self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
+                # # render ray values and prepare target rays
+                # rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
+                #                                                                         tgt_img, mask_occ, tgt_pose,
+                #                                                                         obj_diag, K, roi,
+                #                                                                         self.hpams['n_rays'],
+                #                                                                         self.hpams['n_samples'],
+                #                                                                         shapecode, texturecode,
+                #                                                                         self.hpams['shapenet_obj_cood'],
+                #                                                                         self.hpams['sym_aug'])
+                # # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * mask_rgb) / (torch.sum(mask_rgb)+1e-9)
+                # loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels)) / (
+                #             torch.sum(torch.abs(occ_pixels)) + 1e-9)
+                # # Occupancy loss
+                # loss_occ = torch.sum(
+                #     torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
+                #                    torch.sum(torch.abs(occ_pixels)) + 1e-9)
+                # loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+                # self.loss_total += loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
 
-                self.losses_rgb.append(loss_rgb.detach().item())
-                self.losses_occ.append(loss_occ.detach().item())
-                self.losses_reg.append(loss_reg.detach().item())
+                # self.losses_rgb.append(loss_rgb.detach().item())
+                # self.losses_occ.append(loss_occ.detach().item())
+                # self.losses_reg.append(loss_reg.detach().item())
+
+                # TODO: convert to the same size for model inference
+                img_in = self.preprocess_img(tgt_img)
+                
+                code_idx = self.instoken2idx[instoken]
+                code_idx = torch.as_tensor(code_idx).to(self.device)
+                shapecode = self.shape_codes(code_idx)
+                texturecode = self.texture_codes(code_idx)
+                self.optimized_idx[code_idx.item()] = 1
+                    
+                xyz, viewdir, z_vals, rgb_tgt, occ_pixels = prepare_pixel_samples(tgt_img, mask_occ, tgt_pose,
+                                                                                  obj_diag, K, roi,
+                                                                                  self.hpams['n_rays'],
+                                                                                  self.hpams['n_samples'],
+                                                                                  self.hpams['shapenet_obj_cood'],
+                                                                                  self.hpams['sym_aug'])
+                
+                self.img_in_batch.append(img_in)
+                self.shapecode_batch.append(shapecode.unsqueeze(0))
+                self.texturecode_batch.append(texturecode.unsqueeze(0))
+                self.xyz_batch.append(xyz)
+                self.viewdir_batch.append(viewdir)
+                self.z_vals_batch.append(z_vals)
+                self.gb_tgt_batch.append(rgb_tgt)
+                self.occ_pixels_batch.append(occ_pixels)
+
 
                 if self.niter % self.check_iter == 0:
                     # Just use the cropped region instead to save computation on the visualization
@@ -166,12 +239,16 @@ class TrainerNuScenes:
                     gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
 
-                if len(self.losses_rgb) == self.batch_size:
+
+                # TODO: preprocess of the dataset to only keep the valid sample
+                if len(self.img_in_batch) == self.batch_size:
                     print(f'    optimize niter: {self.niter}, epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}')
                     # optimize when collected a batch of qualified samples
-                    self.loss_total.backward()
+                    
+                    
+                    # self.loss_total.backward()
                     self.opts.step()
-                    self.log_losses(np.mean(self.losses_rgb), np.mean(self.losses_occ), np.mean(self.losses_reg), self.loss_total.detach().item(), time.time() - self.t1)
+                    # self.log_losses(np.mean(self.losses_rgb), np.mean(self.losses_occ), np.mean(self.losses_reg), self.loss_total.detach().item(), time.time() - self.t1)
 
                     # reset all the losses
                     self.opts.zero_grad()
@@ -180,6 +257,15 @@ class TrainerNuScenes:
                     self.losses_occ = []
                     self.losses_reg = []
                     self.loss_total = torch.zeros(1).to(self.device)
+                    
+                    self.img_in_batch = []
+                    self.shapecode_batch = []
+                    self.texturecode_batch = []
+                    self.xyz_batch = []
+                    self.viewdir_batch = []
+                    self.z_vals_batch = []
+                    self.gb_tgt_batch = []
+                    self.occ_pixels_batch = []
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
