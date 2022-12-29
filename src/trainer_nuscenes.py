@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import Resize
 
-from utils import image_float_to_uint8, render_rays, render_full_img
+from utils import image_float_to_uint8, render_rays, render_full_img, preprocess_img_keepratio, preprocess_img_square
 from model_autorf import AutoRF
 from model_codenerf import CodeNeRF
 
@@ -120,7 +120,7 @@ class TrainerNuScenes:
 
                 if self.hpams['arch'] == 'autorf':
                     # preprocess image and predict shapecode and texturecode
-                    img_in = self.preprocess_img(tgt_img)
+                    img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
                     shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
                 elif self.hpams['arch'] == 'codenerf':
                     code_idx = self.instoken2idx[instoken]
@@ -183,16 +183,6 @@ class TrainerNuScenes:
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1
-
-    def preprocess_img(self, img):
-        img = img.unsqueeze(0).permute((0, 3, 1, 2))
-        _, _, im_h, im_w = img.shape
-        if np.maximum(im_h, im_w) > self.hpams['max_img_sz']:
-            ratio = self.hpams['max_img_sz'] / np.maximum(im_h, im_w)
-            new_h = im_h * ratio
-            new_w = im_w * ratio
-            img = Resize((int(new_h), int(new_w)))(img)
-        return img
 
     def log_losses(self, loss_rgb, loss_occ, loss_reg, loss_total, time_spent):
         psnr = -10 * np.log(loss_rgb) / np.log(10)

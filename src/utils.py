@@ -4,7 +4,44 @@ import cv2
 import torch
 import argparse
 import torchvision
+from torchvision.transforms import Resize
 
+
+def preprocess_img_keepratio(self, img, max_img_sz=320):
+    """
+        keep dim, and resize the max dim to max_img_sz if over
+    """
+    img = img.unsqueeze(0).permute((0, 3, 1, 2))
+    _, _, im_h, im_w = img.shape
+    if np.maximum(im_h, im_w) > max_img_sz:
+        ratio = max_img_sz / np.maximum(im_h, im_w)
+        new_h = im_h * ratio
+        new_w = im_w * ratio
+        img = Resize((int(new_h), int(new_w)))(img)
+    return img
+
+
+def preprocess_img_square(img, new_size=128, pad_white=True):
+    """
+        The largest dim resize to new_size, pad the other to make square
+        Make the padding area white
+    """
+    img = img.unsqueeze(0).permute((0, 3, 1, 2))
+    _, _, im_h, im_w = img.shape
+    ratio = new_size / np.maximum(im_h, im_w)
+    new_h = int(im_h * ratio)
+    new_w = int(im_w * ratio)
+    img = Resize((new_h, new_w))(img)
+    if pad_white:
+        new_img = torch.ones((1, 3, new_size, new_size), dtype=torch.float32)
+    else:
+        new_img = torch.zeros((1, 3, new_size, new_size), dtype=torch.float32)
+    y_start = int(new_size/2 - new_h/2)
+    x_start = int(new_size/2 - new_w/2)
+
+    new_img[:, :, y_start: y_start + new_h, x_start: x_start + new_w] = img
+    return new_img
+    
 
 def get_rays_srn(H, W, focal, c2w):
     i, j = torch.meshgrid(torch.linspace(0, W - 1, W), torch.linspace(0, H - 1, H))
