@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import Resize
 
-from utils import image_float_to_uint8, render_rays, render_full_img, prepare_pixel_samples, volume_rendering2
+from utils import image_float_to_uint8, render_rays, render_full_img, prepare_pixel_samples, volume_rendering_batch
 from model_autorf import AutoRF
 from model_codenerf import CodeNeRF
 
@@ -29,27 +29,30 @@ class ParallelModel(nn.Module):
                 z_vals_batch,
                 rgb_tgt_batch,
                 occ_pixels_batch):
+        if self.hpams['arch'] == 'autorf':
+            shapecode_batch, texturecode_batch = self.model.encode_img(img_in_batch)
 
-        shapecode, texturecode = self.model.encode_img(img_in_batch)
+        sigmas, rgbs = self.model(xyz_batch.flatten(0, 1),
+                                  viewdir_batch.flatten(0, 1),
+                                  shapecode_batch,
+                                  texturecode_batch)
 
-        sigmas, rgbs = self.model(xyz,
-                                  viewdir,
-                                  shapecode,
-                                  texturecode)
+        b_size = img_in_batch.shape[0]
+        n, s, _ = sigmas.shape
+        rgb_rays, depth_rays, acc_trans_rays = volume_rendering_batch(sigmas.view(b_size, int(n/b_size), s, -1),
+                                                                      rgbs.view(b_size, int(n/b_size), s, -1),
+                                                                      z_vals_batch)
 
-        rgb_rays, depth_rays, acc_trans_rays = volume_rendering_batch(sigmas, rgbs, z_vals)
-
-        #
-        loss_rgb = torch.sum((rgb_rays - rgb_tgt) ** 2 * torch.abs(occ_pixels))/(
-                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
+        loss_rgb = torch.sum((rgb_rays - rgb_tgt_batch) ** 2 * torch.abs(occ_pixels_batch), dim=[-2, -1])/(
+                torch.sum(torch.abs(occ_pixels_batch), dim=[-2, -1]) + 1e-9)
 
         # Occupancy loss
         loss_occ = torch.sum(
-            torch.exp(-occ_pixels * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels)) / (
-                            torch.sum(torch.abs(occ_pixels)) + 1e-9)
-        loss_reg = torch.norm(shapecode, dim=-1) + torch.norm(texturecode, dim=-1)
+            torch.exp(-occ_pixels_batch * (0.5 - acc_trans_rays.unsqueeze(-1))) * torch.abs(occ_pixels_batch),
+            dim=[-2, -1]) / (torch.sum(torch.abs(occ_pixels_batch), dim=[-2, -1]) + 1e-9)
+        loss_reg = torch.norm(shapecode_batch, dim=-1) + torch.norm(texturecode_batch, dim=-1)
         loss_total = loss_rgb + self.hpams['loss_occ_coef'] * loss_occ
-        return loss_rgb, loss_occ, loss_reg, loss_total
+        return loss_rgb.mean(), loss_occ.mean(), loss_reg.mean(), loss_total.mean()
 
 
 class TrainerNuScenes:
@@ -118,6 +121,7 @@ class TrainerNuScenes:
         self.z_vals_batch = []
         self.rgb_tgt_batch = []
         self.occ_pixels_batch = []
+        self.iter_vis_cnt = 0
 
         while self.nepoch < epochs:
             print(f'epoch: {self.nepoch}')
@@ -232,7 +236,7 @@ class TrainerNuScenes:
                 self.rgb_tgt_batch.append(rgb_tgt.unsqueeze(0))
                 self.occ_pixels_batch.append(occ_pixels.unsqueeze(0))
 
-                if self.niter % self.check_iter == 0:
+                if self.niter % self.check_iter == 0 and self.iter_vis_cnt < 4:
                     # Just use the cropped region instead to save computation on the visualization
                     with torch.no_grad():
                         generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
@@ -241,6 +245,7 @@ class TrainerNuScenes:
                     gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
                     self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
+                    self.iter_vis_cnt += 1
 
                 # TODO: preprocess of the dataset to only keep the valid sample
                 if len(self.img_in_batch) == self.batch_size:
@@ -288,6 +293,7 @@ class TrainerNuScenes:
                     self.z_vals_batch = []
                     self.rgb_tgt_batch = []
                     self.occ_pixels_batch = []
+                    self.iter_vis_cnt = 0
 
                     # iterations are only counted after optimized an qualified batch
                     self.niter += 1

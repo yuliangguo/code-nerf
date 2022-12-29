@@ -13,7 +13,7 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--config_file", dest="config_file", default="jsonfiles/codenerf.nusc.vehicle.car.json")
+    arg_parser.add_argument("--config_file", dest="config_file", default="jsonfiles/autorf.nusc.vehicle.car.json")
     arg_parser.add_argument("--seg_source", dest="seg_source",
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")

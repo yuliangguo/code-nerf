@@ -96,16 +96,16 @@ def volume_rendering_batch(sigmas, rgbs, z_vals):
     """
         consider the first dimension for batch
     """
-    deltas = z_vals[1:] - z_vals[:-1]
-    deltas = torch.cat([deltas, torch.ones_like(deltas[:1]) * 1e10])
-    alphas = 1 - torch.exp(-sigmas.squeeze(-1) * deltas)
+    deltas = z_vals[:, 1:] - z_vals[:, :-1]
+    deltas = torch.cat([deltas, torch.ones_like(deltas[:, :1]) * 1e10], -1)
+    alphas = 1 - torch.exp(-sigmas.squeeze(-1) * deltas.unsqueeze(1))
     trans = 1 - alphas + 1e-10
     transmittance = torch.cat([torch.ones_like(trans[..., :1]), trans], -1)
     accum_trans = torch.cumprod(transmittance, -1)[..., :-1]
     weights = alphas * accum_trans
     rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)
-    depth_final = torch.sum(weights * z_vals, -1)
-    return rgb_final, depth_final, accum_trans[:, -1]
+    depth_final = torch.sum(weights * z_vals.unsqueeze(1), -1)
+    return rgb_final, depth_final, accum_trans[:, :, -1]
 
 
 def prepare_pixel_samples(img, mask_occ, cam_pose, obj_diag, K, roi, n_rays, n_samples, shapenet_obj_cood, sym_aug):
