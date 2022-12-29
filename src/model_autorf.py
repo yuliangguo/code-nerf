@@ -151,11 +151,15 @@ class AutoRF(nn.Module):
         return shape_feat, texture_feat
 
     def forward(self, xyz, viewdir, shape_feat, texture_feat):
-
         xyz = PE(xyz, self.num_xyz_freq)
         pos_feat = self.encoding_xyz(xyz)
         viewdir = PE(viewdir, self.num_dir_freq)
-        # view_feat = self.encoding_viewdir(viewdir)
+
+        # Consider xyz concat pixels from a batch of images in dim 0, and shape_feat, texture_feat are from a batch
+        bsize = shape_feat.shape[0]
+        pixel_per_im = int(xyz.shape[0] / bsize)
+        shape_feat = shape_feat.unsqueeze(1).repeat((1, pixel_per_im, 1)).reshape((pixel_per_im * bsize, 1, -1))
+        texture_feat = texture_feat.unsqueeze(1).repeat((1, pixel_per_im, 1)).reshape((pixel_per_im * bsize, 1, -1))
 
         # TODO: really necessary to pass in pos_feat after every layer?
         for j in range(self.shape_blocks-1):

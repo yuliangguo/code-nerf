@@ -39,6 +39,13 @@ class CodeNeRF(nn.Module):
     def forward(self, xyz, viewdir, shape_latent, texture_latent):
         xyz = PE(xyz, self.num_xyz_freq)
         viewdir = PE(viewdir, self.num_dir_freq)
+
+        # Consider xyz concat pixels from a batch of images in dim 0, and shape_feat, texture_feat are from a batch
+        bsize = shape_latent.shape[0]
+        pixel_per_im = int(xyz.shape[0] / bsize)
+        shape_latent = shape_latent.unsqueeze(1).repeat((1, pixel_per_im, 1)).reshape((pixel_per_im * bsize, 1, -1))
+        texture_latent = texture_latent.unsqueeze(1).repeat((1, pixel_per_im, 1)).reshape((pixel_per_im * bsize, 1, -1))
+
         y = self.encoding_xyz(xyz)
         for j in range(self.shape_blocks):
             z = getattr(self, f"shape_latent_layer_{j+1}")(shape_latent)
