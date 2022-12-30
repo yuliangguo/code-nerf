@@ -88,7 +88,7 @@ class OptimizerNuScenes:
             mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
             # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
             tgt_img = tgt_img * (mask_occ > 0)
-            tgt_img = tgt_img + (mask_occ < 0)
+            tgt_img = tgt_img + (mask_occ <= 0)
 
             if self.hpams['arch'] == 'autorf':
                 # preprocess image and predict shapecode and texturecode
@@ -214,7 +214,7 @@ class OptimizerNuScenes:
             mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
             # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
             tgt_img = tgt_img * (mask_occ > 0)
-            tgt_img = tgt_img + (mask_occ < 0)
+            tgt_img = tgt_img + (mask_occ <= 0)
 
             if self.hpams['arch'] == 'autorf':
                 # preprocess image and predict shapecode and texturecode
@@ -381,7 +381,7 @@ class OptimizerNuScenes:
                     mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
                     # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                     tgt_img = tgt_img * (mask_occ > 0)
-                    tgt_img = tgt_img + (mask_occ < 0)
+                    tgt_img = tgt_img + (mask_occ <= 0)
 
                     # preprocess image and predict shapecode and texturecode
                     # img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
@@ -420,7 +420,7 @@ class OptimizerNuScenes:
                     mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
                     # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                     tgt_img = tgt_img * (mask_occ > 0)
-                    tgt_img = tgt_img + (mask_occ < 0)
+                    tgt_img = tgt_img + (mask_occ <= 0)
 
                     # render ray values and prepare target rays
                     rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
@@ -534,7 +534,7 @@ class OptimizerNuScenes:
                     mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
                     # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                     tgt_img = tgt_img * (mask_occ > 0)
-                    tgt_img = tgt_img + (mask_occ < 0)
+                    tgt_img = tgt_img + (mask_occ <= 0)
 
                     # preprocess image and predict shapecode and texturecode
                     # img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
@@ -594,7 +594,7 @@ class OptimizerNuScenes:
                     mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
                     # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
                     tgt_img = tgt_img * (mask_occ > 0)
-                    tgt_img = tgt_img + (mask_occ < 0)
+                    tgt_img = tgt_img + (mask_occ <= 0)
 
                     # render ray values and prepare target rays
                     rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
