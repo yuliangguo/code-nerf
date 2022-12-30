@@ -7,7 +7,7 @@ import torchvision
 from torchvision.transforms import Resize
 
 
-def preprocess_img_keepratio(self, img, max_img_sz=320):
+def preprocess_img_keepratio(img, max_img_sz=320):
     """
         keep dim, and resize the max dim to max_img_sz if over
     """

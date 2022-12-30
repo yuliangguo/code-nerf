@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Resize
 import pytorch3d.transforms.rotation_conversions as rot_trans
 
-from utils import image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width, render_rays, render_full_img, render_virtual_imgs, calc_cam_pose_err, calc_obj_pose_err,  preprocess_img_keepratio, preprocess_img_square
+from utils import image_float_to_uint8, rot_dist, generate_obj_sz_reg_samples, align_imgs_width, render_rays, render_full_img, render_virtual_imgs, calc_obj_pose_err,  preprocess_img_square
 from skimage.metrics import structural_similarity as compute_ssim
 from model_autorf import AutoRF
 from model_codenerf import CodeNeRF
@@ -102,8 +102,8 @@ class OptimizerNuScenes:
 
             if self.hpams['arch'] == 'autorf':
                 # preprocess image and predict shapecode and texturecode
-                img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
-                # img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
+                # img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
+                img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
                 shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
                 shapecode = shapecode.detach().requires_grad_()
                 texturecode = texturecode.detach().requires_grad_()
@@ -239,8 +239,8 @@ class OptimizerNuScenes:
 
             if self.hpams['arch'] == 'autorf':
                 # preprocess image and predict shapecode and texturecode
-                img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
-                # img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
+                # img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
+                img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
                 shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
                 shapecode = shapecode.detach().requires_grad_()
                 texturecode = texturecode.detach().requires_grad_()
@@ -406,8 +406,8 @@ class OptimizerNuScenes:
                     tgt_img = tgt_img + (mask_occ < 0)
 
                     # preprocess image and predict shapecode and texturecode
-                    img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
-                    # img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
+                    # img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
+                    img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
                     shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
                     shapecode_list.append(shapecode)
                     texturecode_list.append(texturecode)
@@ -559,8 +559,8 @@ class OptimizerNuScenes:
                     tgt_img = tgt_img + (mask_occ < 0)
 
                     # preprocess image and predict shapecode and texturecode
-                    img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
-                    # img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
+                    # img_in = preprocess_img_keepratio(tgt_img, self.hpams['max_img_sz'])
+                    img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
                     shapecode, texturecode = self.model.encode_img(img_in.to(self.device))
                     shapecode_list.append(shapecode)
                     texturecode_list.append(texturecode)

@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import Resize
 
-from utils import image_float_to_uint8, render_full_img, prepare_pixel_samples, volume_rendering_batch, preprocess_img_keepratio, preprocess_img_square
+from utils import image_float_to_uint8, render_full_img, prepare_pixel_samples, volume_rendering_batch, preprocess_img_square
 from model_autorf import AutoRF
 from model_codenerf import CodeNeRF
 

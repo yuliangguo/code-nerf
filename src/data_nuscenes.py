@@ -11,7 +11,7 @@ import matplotlib.patches as patches
 from PIL import Image
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.geometry_utils import BoxVisibility, view_points
-from cityscapesscripts.helpers.labels import labels, name2label, trainId2label
+from cityscapesscripts.helpers.labels import name2label, trainId2label
 
 import data_splits_nusc
 
@@ -294,51 +294,13 @@ class NuScenesData:
         subset_file = 'jsonfiles/nusc.' + nusc_version + '.' + split + '.' + nusc_cat + '.json'
         if os.path.exists(subset_file):
             nusc_subset = json.load(open(subset_file))
+            # TODO: if dataset parameters are different, reproduce the valid sample indexing
             self.instokens = nusc_subset['instokens']
             self.anntokens = nusc_subset['anntokens']
             self.ins_ann_tokens = nusc_subset['ins_ann_tokens']
             print('Loaded pre-prepared subset of instance and annotation lists.')
         else:
-            # retrieve all the target instance
-            print('Preparing related subset of instance and annotation lists ...')
-            for instance in tqdm(instance_all):
-                if self.nusc.get('category', instance['category_token'])['name'] == nusc_cat:
-                    instoken = instance['token']
-                    # self.tgt_instance_list.append(instance)
-                    anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
-                    for anntoken in anntokens:
-                        # rule out those night samples
-                        sample_ann = self.nusc.get('sample_annotation', anntoken)
-                        sample_record = self.nusc.get('sample', sample_ann['sample_token'])
-                        scene = self.nusc.get('scene', sample_record['scene_token'])
-                        if 'mini' in nusc_version:
-                            if split == 'train' and scene['name'] not in data_splits_nusc.mini_train:
-                                continue
-                            if split == 'val' and scene['name'] not in data_splits_nusc.mini_val:
-                                continue
-                        if 'trainval' in nusc_version:
-                            if split == 'train' and scene['name'] not in data_splits_nusc.train:
-                                continue
-                            if split == 'val' and scene['name'] not in data_splits_nusc.val:
-                                continue
-                        if 'test' in nusc_version:
-                            if split == 'test' and scene['name'] not in data_splits_nusc.test:
-                                continue
-
-                        log_file = self.nusc.get('log', scene['log_token'])['logfile']
-                        log_items = log_file.split('-')
-                        if int(log_items[4]) >= 18:  # Consider time after 18:00 as night
-                            continue
-                        self.instokens.append(instoken)
-                        self.anntokens.append(anntoken)
-                        if instoken not in self.ins_ann_tokens.keys():
-                            self.ins_ann_tokens[instoken] = anntokens
-            # save into json file for quick load next time
-            nusc_subset = {}
-            nusc_subset['instokens'] = self.instokens
-            nusc_subset['anntokens'] = self.anntokens
-            nusc_subset['ins_ann_tokens'] = self.ins_ann_tokens
-            json.dump(nusc_subset, open(subset_file, 'w'), indent=4)
+            self.preprocess_dataset(nusc_cat, split, instance_all, subset_file)
 
         self.lenids = len(self.anntokens)
         print(f'{self.lenids} annotations in {self.nusc_cat} category are included in dataloader.')
@@ -350,9 +312,54 @@ class NuScenesData:
             self.max_rot_pert = hpams['dataset']['max_rot_pert']
             self.max_t_pert = hpams['dataset']['max_t_pert']
 
+    def preprocess_dataset(self, nusc_cat, split, instance_all, subset_file):
+        # TODO: go through the full dataset once to save the valid indices
+        # retrieve all the target instance
+        print('Preparing related subset of instance and annotation lists ...')
+        for instance in tqdm(instance_all):
+            if self.nusc.get('category', instance['category_token'])['name'] == nusc_cat:
+                instoken = instance['token']
+                # self.tgt_instance_list.append(instance)
+                anntokens = self.nusc.field2token('sample_annotation', 'instance_token', instoken)
+                for anntoken in anntokens:
+                    # rule out those night samples
+                    sample_ann = self.nusc.get('sample_annotation', anntoken)
+                    sample_record = self.nusc.get('sample', sample_ann['sample_token'])
+                    scene = self.nusc.get('scene', sample_record['scene_token'])
+                    if 'mini' in nusc_version:
+                        if split == 'train' and scene['name'] not in data_splits_nusc.mini_train:
+                            continue
+                        if split == 'val' and scene['name'] not in data_splits_nusc.mini_val:
+                            continue
+                    if 'trainval' in nusc_version:
+                        if split == 'train' and scene['name'] not in data_splits_nusc.train:
+                            continue
+                        if split == 'val' and scene['name'] not in data_splits_nusc.val:
+                            continue
+                    if 'test' in nusc_version:
+                        if split == 'test' and scene['name'] not in data_splits_nusc.test:
+                            continue
+
+                    log_file = self.nusc.get('log', scene['log_token'])['logfile']
+                    log_items = log_file.split('-')
+                    if int(log_items[4]) >= 18:  # Consider time after 18:00 as night
+                        continue
+
+                    self.instokens.append(instoken)
+                    self.anntokens.append(anntoken)
+                    if instoken not in self.ins_ann_tokens.keys():
+                        self.ins_ann_tokens[instoken] = anntokens
+        # save into json file for quick load next time
+        nusc_subset = {}
+        nusc_subset['instokens'] = self.instokens
+        nusc_subset['anntokens'] = self.anntokens
+        nusc_subset['ins_ann_tokens'] = self.ins_ann_tokens
+        json.dump(nusc_subset, open(subset_file, 'w'), indent=4)
+
     def __len__(self):
         return self.lenids
-    
+
+    # TODO: a new function to prepare batch data for training -- enable multi-thread is critical
     def __getitem__(self, idx):
         sample_data = {}
         instoken = self.instokens[idx]
