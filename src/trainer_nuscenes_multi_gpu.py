@@ -30,7 +30,10 @@ class ParallelModel(nn.Module):
                 rgb_tgt_batch,
                 occ_pixels_batch):
         if self.hpams['arch'] == 'autorf':
-            shapecode_batch, texturecode_batch = self.model.encode_img(img_in_batch)
+            shapecode, texturecode = self.model.encode_img(img_in_batch)
+            # Under this way, model output can be assigned to original saved code without break the reference
+            shapecode_batch.data = shapecode.data
+            texturecode_batch.data = texturecode.data
 
         sigmas, rgbs = self.model(xyz_batch.flatten(0, 1),
                                   viewdir_batch.flatten(0, 1),
@@ -249,17 +252,13 @@ class TrainerNuScenes:
                               torch.from_numpy(ret).permute(2, 0, 1))
 
     def set_optimizers(self):
+        # Always include codes as parameter in case of any updates
         lr1, lr2 = self.get_learning_rate()
-        if self.hpams['arch'] == 'autorf':
-            self.opts = torch.optim.AdamW([{'params': self.model.parameters(), 'lr': lr1}])
-        elif self.hpams['arch'] == 'codenerf':
-            self.opts = torch.optim.AdamW([
-                {'params': self.model.parameters(), 'lr': lr1},
-                {'params': self.shape_codes.parameters(), 'lr': lr2},
-                {'params': self.texture_codes.parameters(), 'lr': lr2}
-            ])
-        else:
-            print('ERROR: No valid network architecture is declared in config file!')
+        self.opts = torch.optim.AdamW([
+            {'params': self.model.parameters(), 'lr': lr1},
+            {'params': self.shape_codes.parameters(), 'lr': lr2},
+            {'params': self.texture_codes.parameters(), 'lr': lr2}
+        ])
 
     def get_learning_rate(self):
         model_lr, latent_lr = self.hpams['lr_schedule'][0], self.hpams['lr_schedule'][1]
