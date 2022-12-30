@@ -22,7 +22,6 @@ class ImgEncoder(nn.Module):
         super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-            # norm_layer = nn.InstanceNorm2d
         self._norm_layer = norm_layer
 
         self.inplanes = 64
@@ -123,9 +122,12 @@ def PE(x, degree):
 
 class AutoRF(nn.Module):
     def __init__(self, shape_blocks=5, texture_blocks=5, latent_dim=128,
-                 num_xyz_freq=10, num_dir_freq=4):
+                 num_xyz_freq=10, num_dir_freq=4, norm_layer_type='BatchNorm2d'):
         super().__init__()
-        self.img_encoder = ImgEncoder(BasicBlock, [3, 4, 6, 3], num_classes=latent_dim)
+        if norm_layer_type == 'InstanceNorm2d':
+            self.img_encoder = ImgEncoder(BasicBlock, [3, 4, 6, 3], num_classes=latent_dim, norm_layer=nn.InstanceNorm2d)
+        else:
+            self.img_encoder = ImgEncoder(BasicBlock, [3, 4, 6, 3], num_classes=latent_dim, norm_layer=nn.BatchNorm2d)
 
         self.shape_blocks = shape_blocks
         self.texture_blocks = texture_blocks

@@ -555,43 +555,7 @@ class NuScenesData:
         sample_data['instoken'] = self.instoken_per_ann[anntoken]
         sample_data['anntoken'] = anntoken
 
-        # # TODO: training data add ray based samples
-        # if self.is_train:
-        #     # print(f'epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}, obj: {obj_idx} is qualified')
-        #     obj_sz = self.nusc.get('sample_annotation', anntoken)['size']
-        #     obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-        #     H, W = imgs.shape[1:3]
-        #     rois[:, 0:2] -= self.hpams['roi_margin']
-        #     rois[:, 2:4] += self.hpams['roi_margin']
-        #     rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
-        #     rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
-        #     rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
-        #
-        #     tgt_img, tgt_pose, mask_occ, roi, K = \
-        #         imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
-        #
-        #     # crop tgt img to roi
-        #     tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]]
-        #     mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
-        #     # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
-        #     tgt_img = tgt_img * (mask_occ > 0)
-        #     tgt_img = tgt_img + (mask_occ < 0)
-        #
-        #     # Preprocess img for model inference (pad and resize to the same square size)
-        #     img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
-        #
-        #     code_idx = self.instoken2idx[instoken]
-        #     code_idx = torch.as_tensor(code_idx).to(self.device)
-        #     shapecode = self.shape_codes(code_idx).unsqueeze(0)
-        #     texturecode = self.texture_codes(code_idx).unsqueeze(0)
-        #     self.optimized_idx[code_idx.item()] = 1
-        #
-        #     xyz, viewdir, z_vals, rgb_tgt, occ_pixels = prepare_pixel_samples(tgt_img, mask_occ, tgt_pose,
-        #                                                                       obj_diag, K, roi,
-        #                                                                       self.hpams['n_rays'],
-        #                                                                       self.hpams['n_samples'],
-        #                                                                       self.hpams['shapenet_obj_cood'],
-        #                                                                       self.hpams['sym_aug'])
+        # TODO: if training, prepare batch data including ray based samples to further improve efficiency
 
         return sample_data
 

@@ -107,9 +107,6 @@ class TrainerNuScenes:
         self.set_optimizers()
         self.opts.zero_grad()
         self.t1 = time.time()
-        
-        # initialize the accumulaters here to avoid memory leak between epochs
-
 
         while self.nepoch < epochs:
             print(f'epoch: {self.nepoch}')
@@ -229,16 +226,6 @@ class TrainerNuScenes:
             # reset all the losses
             self.opts.zero_grad()
             self.t1 = time.time()
-
-            # self.img_in_batch = []
-            # self.shapecode_batch = []
-            # self.texturecode_batch = []
-            # self.xyz_batch = []
-            # self.viewdir_batch = []
-            # self.z_vals_batch = []
-            # self.rgb_tgt_batch = []
-            # self.occ_pixels_batch = []
-            # self.iter_vis_cnt = 0
 
             # iterations are only counted after optimized an qualified batch
             self.niter += 1
