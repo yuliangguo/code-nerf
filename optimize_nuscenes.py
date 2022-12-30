@@ -20,7 +20,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=0)
     arg_parser.add_argument("--multi_ann_ops", dest="multi_ann_ops", default=False,
                             help="if to optimize multiple annotations of the same instance jointly")
-    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=True,
+    arg_parser.add_argument("--opt_pose", dest="opt_pose", default=False,
                             help="if to optimize camera poses, if true the dataloader will generate erroneous poses")
     args = arg_parser.parse_args()
 
@@ -39,7 +39,7 @@ if __name__ == '__main__':
         nusc_seg_dir,
         nusc_version,
         split='val',
-        num_cams_per_sample=1,
+        is_train=False,
         debug=False,
         add_pose_err=args.opt_pose
     )

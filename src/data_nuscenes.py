@@ -1,9 +1,7 @@
 import random
-import imageio
 import numpy as np
 import torch
 import json
-# from torchvision import transforms
 import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -14,6 +12,7 @@ from nuscenes.utils.geometry_utils import BoxVisibility, view_points
 from cityscapesscripts.helpers.labels import name2label, trainId2label
 
 import data_splits_nusc
+from utils import preprocess_img_square
 
 # Reference: https://github.com/facebookresearch/detectron2/blob/master/detectron2/utils/colormap.py#L14
 _COLORS = np.array(
@@ -260,7 +259,7 @@ class NuScenesData:
                  nusc_seg_dir,
                  nusc_version,
                  split='train',
-                 num_cams_per_sample=1,
+                 is_train=True,
                  add_pose_err=False,
                  debug=False,
                  ):
@@ -279,6 +278,7 @@ class NuScenesData:
         self.mask_pixels = hpams['dataset']['mask_pixels']
         self.img_h = hpams['dataset']['img_h']
         self.img_w = hpams['dataset']['img_w']
+        self.is_train = is_train
         self.debug = debug
 
         self.nusc_data_dir = nusc_data_dir
@@ -296,7 +296,7 @@ class NuScenesData:
             nusc_subset = json.load(open(subset_index_file))
             if nusc_subset['box_iou_th'] != self.box_iou_th or nusc_subset['max_dist'] != self.max_dist or nusc_subset['mask_pixels'] != self.mask_pixels:
                 print('Different dataset config found! Re-preprocess the dataset to prepare indices of valid samples...')
-                self.preprocess_dataset(nusc_cat, split, instance_all, subset_index_file)
+                self.preprocess_dataset(nusc_cat, split, instance_all, nusc_version, subset_index_file)
             else:
                 self.all_valid_samples = nusc_subset['all_valid_samples']
                 self.anntokens_per_ins = nusc_subset['anntokens_per_ins']
@@ -304,11 +304,10 @@ class NuScenesData:
                 print('Loaded existing index file for valid samples.')
         else:
             print('No existing index file found! Preprocess the dataset to prepare indices of valid samples...')
-            self.preprocess_dataset(nusc_cat, split, instance_all, subset_index_file)
+            self.preprocess_dataset(nusc_cat, split, instance_all, nusc_version, subset_index_file)
 
         self.lenids = len(self.all_valid_samples)
         print(f'{self.lenids} annotations in {self.nusc_cat} category are included in dataloader.')
-        self.num_cams_per_sample = num_cams_per_sample
 
         # for adding error to pose
         self.add_pose_err = add_pose_err
@@ -316,7 +315,7 @@ class NuScenesData:
             self.max_rot_pert = hpams['dataset']['max_rot_pert']
             self.max_t_pert = hpams['dataset']['max_t_pert']
 
-    def preprocess_dataset(self, nusc_cat, split, instance_all, subset_file):
+    def preprocess_dataset(self, nusc_cat, split, instance_all, nusc_version, subset_file):
         """
             Go through the full dataset once to save the valid indices. Save the index file for later direct refer.
         """
@@ -362,7 +361,6 @@ class NuScenesData:
                             if len(boxes) == 1:
                                 # box here is in sensor coordinate system
                                 box = boxes[0]
-                                # compute the camera pose in object frame, make sure dataset and model definitions consistent
                                 obj_center = box.center
                                 corners = view_points(box.corners(), view=camera_intrinsic, normalize=True)[:2, :]
                                 min_x = np.min(corners[0, :])
@@ -428,16 +426,6 @@ class NuScenesData:
         if self.debug:
             print(f'anntoken: {anntoken}')
 
-        # just return one image sample
-        imgs = []
-        masks_occ = []
-        cam_poses = []
-        obj_poses = []
-        cam_intrinsics = []
-        rois = []  # used to sample rays
-        cam_poses_w_err = []
-        obj_poses_w_err = []
-
         # For each annotation (one annotation per timestamp) get all the sensors
         sample_ann = self.nusc.get('sample_annotation', anntoken)
         sample_record = self.nusc.get('sample', sample_ann['sample_token'])
@@ -475,7 +463,10 @@ class NuScenesData:
             R_c2o_w_err = obj_orientation_w_err.transpose()
             t_c2o_w_err = -R_c2o_w_err @ np.expand_dims(obj_center_w_err, -1)
             cam_pose_w_err = np.concatenate([R_c2o_w_err, t_c2o_w_err], axis=1)
-            # TODO: not synced with box_2d
+
+            sample_data['cam_poses_w_err'] = torch.from_numpy(cam_pose_w_err.astype(np.float32))
+            sample_data['obj_poses_w_err'] = torch.from_numpy(obj_pose_w_err.astype(np.float32))
+            # TODO: currently not synced with box_2d, so the crop image might not be centered perfectly
 
         # Compute camera pose in object frame = c2o transformation matrix
         # Recall that object pose in camera frame = o2c transformation matrix
@@ -525,18 +516,6 @@ class NuScenesData:
             area_ratio = 0
             mask_occ = None
 
-        imgs.append(img)
-        masks_occ.append(mask_occ.astype(np.int32))
-        # masks.append((pan_label == tgt_ins_id).astype(np.int32))
-        rois.append(box_2d)
-        cam_intrinsics.append(camera_intrinsic)
-        cam_poses.append(cam_pose)
-        obj_poses.append(obj_pose)
-
-        if self.add_pose_err:
-            cam_poses_w_err.append(cam_pose_w_err)
-            obj_poses_w_err.append(obj_pose_w_err)
-
         if self.debug:
             print(
                 f'        tgt instance id: {tgt_ins_id}, '
@@ -567,20 +546,53 @@ class NuScenesData:
             axes[1].add_patch(rect)
             plt.show()
 
-        sample_data['imgs'] = torch.from_numpy(np.asarray(imgs).astype(np.float32)/255.)
-        sample_data['masks_occ'] = torch.from_numpy(np.asarray(masks_occ).astype(np.float32))
-        sample_data['rois'] = torch.from_numpy(np.asarray(rois).astype(np.int32))
-        sample_data['cam_intrinsics'] = torch.from_numpy(np.asarray(cam_intrinsics).astype(np.float32))
-        sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_poses).astype(np.float32))
-        sample_data['obj_poses'] = torch.from_numpy(np.asarray(obj_poses).astype(np.float32))
+        sample_data['imgs'] = torch.from_numpy(img.astype(np.float32)/255.)
+        sample_data['masks_occ'] = torch.from_numpy(mask_occ.astype(np.float32))
+        sample_data['rois'] = torch.from_numpy(np.asarray(box_2d).astype(np.int32))
+        sample_data['cam_intrinsics'] = torch.from_numpy(camera_intrinsic.astype(np.float32))
+        sample_data['cam_poses'] = torch.from_numpy(np.asarray(cam_pose).astype(np.float32))
+        sample_data['obj_poses'] = torch.from_numpy(np.asarray(obj_pose).astype(np.float32))
         sample_data['instoken'] = self.instoken_per_ann[anntoken]
         sample_data['anntoken'] = anntoken
 
-        if self.add_pose_err:
-            sample_data['cam_poses_w_err'] = torch.from_numpy(np.asarray(cam_poses_w_err).astype(np.float32))
-            sample_data['obj_poses_w_err'] = torch.from_numpy(np.asarray(obj_poses_w_err).astype(np.float32))
+        # # TODO: training data add ray based samples
+        # if self.is_train:
+        #     # print(f'epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}, obj: {obj_idx} is qualified')
+        #     obj_sz = self.nusc.get('sample_annotation', anntoken)['size']
+        #     obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
+        #     H, W = imgs.shape[1:3]
+        #     rois[:, 0:2] -= self.hpams['roi_margin']
+        #     rois[:, 2:4] += self.hpams['roi_margin']
+        #     rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
+        #     rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
+        #     rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
+        #
+        #     tgt_img, tgt_pose, mask_occ, roi, K = \
+        #         imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
+        #
+        #     # crop tgt img to roi
+        #     tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]]
+        #     mask_occ = mask_occ[roi[1]: roi[3], roi[0]: roi[2]].unsqueeze(-1)
+        #     # only keep the fg portion, but turn BG to white (for ShapeNet Pretrained model)
+        #     tgt_img = tgt_img * (mask_occ > 0)
+        #     tgt_img = tgt_img + (mask_occ < 0)
+        #
+        #     # Preprocess img for model inference (pad and resize to the same square size)
+        #     img_in = preprocess_img_square(tgt_img, self.hpams['in_img_sz'])
+        #
+        #     code_idx = self.instoken2idx[instoken]
+        #     code_idx = torch.as_tensor(code_idx).to(self.device)
+        #     shapecode = self.shape_codes(code_idx).unsqueeze(0)
+        #     texturecode = self.texture_codes(code_idx).unsqueeze(0)
+        #     self.optimized_idx[code_idx.item()] = 1
+        #
+        #     xyz, viewdir, z_vals, rgb_tgt, occ_pixels = prepare_pixel_samples(tgt_img, mask_occ, tgt_pose,
+        #                                                                       obj_diag, K, roi,
+        #                                                                       self.hpams['n_rays'],
+        #                                                                       self.hpams['n_samples'],
+        #                                                                       self.hpams['shapenet_obj_cood'],
+        #                                                                       self.hpams['sym_aug'])
 
-        # TODO: training data add ray based samples
         return sample_data
 
     def get_ins_samples(self, instoken):
@@ -774,7 +786,6 @@ if __name__ == '__main__':
         nusc_seg_dir,
         nusc_version,
         split='val',
-        num_cams_per_sample=1,
         debug=True,
         add_pose_err=False
     )
@@ -790,27 +801,19 @@ if __name__ == '__main__':
     #         print('find an existence in nuimages')
     #     except:
     #         print('no match in nuimages')
-    # 
-    # Analysis of valid portion of data
-    # valid_ann_total = 0
-    # valid_ins_dic = {}
-    # obj_idx = 0
-    # for batch_idx, batch_data in enumerate(dataloader):
-    #     masks_occ = batch_data['masks_occ'][obj_idx]
-    #     rois = batch_data['rois'][obj_idx]
-    #     cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
-    #     cam_poses = batch_data['cam_poses'][obj_idx]
-    #     instoken = batch_data['instoken'][obj_idx]
-    #     anntoken = batch_data['anntoken'][obj_idx]
     #
-    #     num_valid_cam = np.sum(valid_flags.numpy())
-    #     valid_ann_total += int(num_valid_cam > 0)
-    #     if instoken[obj_idx] not in valid_ins_dic.keys():
-    #         valid_ins_dic[instoken[obj_idx]] = 0
-    #     if num_valid_cam > 0:
-    #         valid_ins_dic[instoken[obj_idx]] = 1
-    #     print(f'Finish {batch_idx} / {len(dataloader)}, valid samples: {num_valid_cam}')
-    # print(f'Number of annotations having valid camera data support: {valid_ann_total} out of {len(dataloader)} annotations')
+    # Analysis of valid portion of data
+    valid_ann_total = 0
+    valid_ins_dic = {}
+    obj_idx = 0
+    for batch_idx, batch_data in enumerate(dataloader):
+        masks_occ = batch_data['masks_occ'][obj_idx]
+        rois = batch_data['rois'][obj_idx]
+        cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
+        cam_poses = batch_data['cam_poses'][obj_idx]
+        instoken = batch_data['instoken'][obj_idx]
+        anntoken = batch_data['anntoken'][obj_idx]
+        print(f'Finish {batch_idx} / {len(dataloader)}')
     #
     # valid_ins = [ins for ins in valid_ins_dic.keys() if valid_ins_dic[ins] == 1]
     # print(f'Number of instance with having valid camera data support: {len(valid_ins)} out of {len(valid_ins_dic.keys())} instances')

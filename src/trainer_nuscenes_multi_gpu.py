@@ -130,30 +130,27 @@ class TrainerNuScenes:
             Optimize on each annotation frame independently
         """
 
-        cam_id = 0
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
             # TODO: current data loader only load one image data per batch, so the real batch needs manual accumulation
-            for obj_idx, imgs in enumerate(batch_data['imgs']):
-                masks_occ = batch_data['masks_occ'][obj_idx]
-                rois = batch_data['rois'][obj_idx]
-                cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
-                cam_poses = batch_data['cam_poses'][obj_idx]
+            for obj_idx, img in enumerate(batch_data['imgs']):
+                tgt_img = img.clone()
+                mask_occ = batch_data['masks_occ'][obj_idx].clone()
+                roi = batch_data['rois'][obj_idx]
+                K = batch_data['cam_intrinsics'][obj_idx]
+                tgt_pose = batch_data['cam_poses'][obj_idx]
                 instoken = batch_data['instoken'][obj_idx]
                 anntoken = batch_data['anntoken'][obj_idx]
 
                 # print(f'epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}, obj: {obj_idx} is qualified')
                 obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
                 obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
-                H, W = imgs.shape[1:3]
-                rois[:, 0:2] -= self.hpams['roi_margin']
-                rois[:, 2:4] += self.hpams['roi_margin']
-                rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
-                rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W-1))
-                rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H-1))
-
-                tgt_img, tgt_pose, mask_occ, roi, K = \
-                    imgs[cam_id], cam_poses[cam_id], masks_occ[cam_id], rois[cam_id], cam_intrinsics[cam_id]
+                H, W = tgt_img.shape[0:2]
+                roi[0:2] -= self.hpams['roi_margin']
+                roi[2:4] += self.hpams['roi_margin']
+                roi[0:2] = torch.maximum(roi[0:2], torch.as_tensor(0))
+                roi[2] = torch.minimum(roi[2], torch.as_tensor(W-1))
+                roi[3] = torch.minimum(roi[3], torch.as_tensor(H-1))
 
                 # crop tgt img to roi
                 tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]]
@@ -193,9 +190,7 @@ class TrainerNuScenes:
                         generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
                                                         self.hpams['n_samples'], shapecode, texturecode,
                                                         self.hpams['shapenet_obj_cood'])
-                    gt_img = imgs[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
-                    gt_mask_occ = masks_occ[cam_id, roi[1]:roi[3], roi[0]:roi[2]]
-                    self.log_img(generated_img, gt_img, gt_mask_occ, anntoken)
+                    self.log_img(generated_img, img[roi[1]: roi[3], roi[0]: roi[2]], mask_occ, anntoken)
                     self.iter_vis_cnt += 1
 
                 # TODO: preprocess of the dataset to only keep the valid sample
@@ -257,7 +252,7 @@ class TrainerNuScenes:
         H, W = generated_img.shape[:-1]
         ret = torch.zeros(H, 2 * W, 3)
         ret[:, :W, :] = generated_img
-        ret[:, W:, :] = gtimg * 0.7 + mask_occ.unsqueeze(-1) * 0.3
+        ret[:, W:, :] = gtimg * 0.7 + mask_occ * 0.3
         ret = image_float_to_uint8(ret.detach().cpu().numpy())
         self.writer.add_image('train_' + str(self.niter) + '_' + ann_token,
                               torch.from_numpy(ret).permute(2, 0, 1))

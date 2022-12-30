@@ -57,8 +57,6 @@ class OptimizerNuScenes:
             Optimize on each annotation frame independently
         """
 
-        # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
-        cam_ids = [0]
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
             print(f'num obj: {batch_idx}/{len(self.dataloader)}')
@@ -68,30 +66,22 @@ class OptimizerNuScenes:
             rois = batch_data['rois']
             cam_intrinsics = batch_data['cam_intrinsics']
             cam_poses = batch_data['cam_poses']
-            valid_flags = batch_data['valid_flags']
             instoken = batch_data['instoken']
             anntoken = batch_data['anntoken']
 
-            tgt_imgs, tgt_poses, masks_occ, rois, cam_intrinsics, valid_flags = \
-                imgs[0, cam_ids], cam_poses[0, cam_ids], masks_occ[0, cam_ids], \
-                rois[0, cam_ids], cam_intrinsics[0, cam_ids], valid_flags[0, cam_ids]
-
-            if np.sum(valid_flags.numpy()) == 0:
-                continue
+            tgt_img, tgt_cam, mask_occ, roi, K = \
+                imgs[0], cam_poses[0], masks_occ[0], rois[0], cam_intrinsics[0]
 
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
-            H, W = tgt_imgs.shape[1:3]
-            rois[:, 0:2] -= self.hpams['roi_margin']
-            rois[:, 2:4] += self.hpams['roi_margin']
-            rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
-            rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
-            rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
-
-            tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[0], tgt_poses[0], masks_occ[0], rois[0], \
-                                                  cam_intrinsics[0]
+            H, W = tgt_img.shape[0:2]
+            roi[0:2] -= self.hpams['roi_margin']
+            roi[2:4] += self.hpams['roi_margin']
+            roi[0:2] = torch.maximum(roi[0:2], torch.as_tensor(0))
+            roi[2] = torch.minimum(roi[2], torch.as_tensor(W - 1))
+            roi[3] = torch.minimum(roi[3], torch.as_tensor(H - 1))
 
             # crop tgt img to roi
             tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]]
@@ -127,7 +117,7 @@ class OptimizerNuScenes:
 
                 # render ray values and prepare target rays
                 rgb_rays, depth_rays, acc_trans_rays, rgb_tgt, occ_pixels = render_rays(self.model, self.device,
-                                                                                        tgt_img, mask_occ, tgt_pose,
+                                                                                        tgt_img, mask_occ, tgt_cam,
                                                                                         obj_diag, K, roi,
                                                                                         self.hpams['n_rays'],
                                                                                         self.hpams['n_samples'],
@@ -147,7 +137,7 @@ class OptimizerNuScenes:
                 loss.backward()
                 loss_per_img.append(loss_rgb.detach().item())
                 # Different roi sizes are dealt in save_image later
-                gt_imgs.append(tgt_imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
+                gt_imgs.append(imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                 gt_masks_occ.append(masks_occ[0, roi[1]:roi[3], roi[0]:roi[2]])
                 if self.nopts == self.hpams['optimize']['num_opts'] - 1:
                     self.log_eval_psnr(loss_per_img, batch_data['anntoken'])
@@ -160,9 +150,8 @@ class OptimizerNuScenes:
                     generated_imgs = []
                     with torch.no_grad():
                         # for num, cam_id in enumerate(cam_ids):
-                        tgt_pose, roi, K = tgt_poses[0], rois[0], cam_intrinsics[0]
                         # render full image
-                        generated_img = render_full_img(self.model, self.device, tgt_pose, obj_sz, K, roi,
+                        generated_img = render_full_img(self.model, self.device, tgt_cam, obj_sz, K, roi,
                                                         self.hpams['n_samples'], shapecode, texturecode,
                                                         self.hpams['shapenet_obj_cood'])
                         generated_imgs.append(generated_img)
@@ -189,10 +178,9 @@ class OptimizerNuScenes:
             Optimize on each annotation frame independently
         """
 
-        # cam_ids = [ii for ii in range(0, self.num_cams_per_sample)]
-        cam_ids = [0]
         # Per object
         for batch_idx, batch_data in enumerate(self.dataloader):
+            print(f'num obj: {batch_idx}/{len(self.dataloader)}')
             imgs = batch_data['imgs']
             masks_occ = batch_data['masks_occ']
             rois = batch_data['rois']
@@ -200,35 +188,26 @@ class OptimizerNuScenes:
             cam_poses = batch_data['cam_poses']
             cam_poses_w_err = batch_data['cam_poses_w_err']
             obj_poses_w_err = batch_data['obj_poses_w_err']
-            valid_flags = batch_data['valid_flags']
             instoken = batch_data['instoken']
             anntoken = batch_data['anntoken']
 
-            tgt_imgs, tgt_cams, pred_poses, masks_occ, rois, cam_intrinsics, valid_flags = \
-                imgs[0, cam_ids], cam_poses[0, cam_ids], cam_poses_w_err[0, cam_ids], masks_occ[0, cam_ids], \
-                rois[0, cam_ids], cam_intrinsics[0, cam_ids], valid_flags[0, cam_ids]
+            tgt_img, tgt_cam, pred_pose, mask_occ, roi, K = \
+                imgs[0], cam_poses[0], cam_poses_w_err[0], masks_occ[0], \
+                rois[0], cam_intrinsics[0]
 
             if self.hpams['optimize']['opt_obj_pose']:
-                pred_poses = obj_poses_w_err[0, cam_ids]
-
-            if np.sum(valid_flags.numpy()) == 0:
-                continue
-
-            print(f'num obj: {batch_idx}/{len(self.dataloader)}')
+                pred_pose = obj_poses_w_err[0]
 
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
             obj_diag = np.linalg.norm(obj_sz).astype(np.float32)
 
-            H, W = tgt_imgs.shape[1:3]
-            rois[:, 0:2] -= self.hpams['roi_margin']
-            rois[:, 2:4] += self.hpams['roi_margin']
-            rois[:, 0:2] = torch.maximum(rois[:, 0:2], torch.as_tensor(0))
-            rois[:, 2] = torch.minimum(rois[:, 2], torch.as_tensor(W - 1))
-            rois[:, 3] = torch.minimum(rois[:, 3], torch.as_tensor(H - 1))
-
-            tgt_img, tgt_pose, mask_occ, roi, K = tgt_imgs[0], tgt_cams[0], masks_occ[0], rois[0], \
-                                                  cam_intrinsics[0]
+            H, W = tgt_img.shape[0:2]
+            roi[0:2] -= self.hpams['roi_margin']
+            roi[2:4] += self.hpams['roi_margin']
+            roi[0:2] = torch.maximum(roi[0:2], torch.as_tensor(0))
+            roi[2] = torch.minimum(roi[2], torch.as_tensor(W - 1))
+            roi[3] = torch.minimum(roi[3], torch.as_tensor(H - 1))
 
             # crop tgt img to roi
             tgt_img = tgt_img[roi[1]: roi[3], roi[0]: roi[2]]
@@ -253,8 +232,8 @@ class OptimizerNuScenes:
                 print('ERROR: No valid network architecture is declared in config file!')
 
             # set pose parameters
-            rot_mat_vec = pred_poses[:, :3, :3]
-            trans_vec = pred_poses[:, :3, 3].to(self.device).detach().requires_grad_()
+            rot_mat_vec = pred_pose[:3, :3].unsqueeze(0)
+            trans_vec = pred_pose[:3, 3].unsqueeze(0).to(self.device).detach().requires_grad_()
             if self.hpams['euler_rot']:
                 rot_vec = rot_trans.matrix_to_euler_angles(rot_mat_vec, 'XYZ').to(self.device).detach().requires_grad_()
             else:
@@ -312,10 +291,10 @@ class OptimizerNuScenes:
                 loss.backward()
                 loss_per_img.append(loss_rgb.detach().item())
                 # Different roi sizes are dealt in save_image later
-                gt_imgs.append(tgt_imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
+                gt_imgs.append(imgs[0, roi[1]:roi[3], roi[0]:roi[2]])  # only include the roi area
                 gt_masks_occ.append(masks_occ[0, roi[1]:roi[3], roi[0]:roi[2]])
                 est_cams[0] = cam2opt.detach().cpu()
-                errs_R, errs_T = calc_obj_pose_err(est_cams, tgt_cams)
+                errs_R, errs_T = calc_obj_pose_err(est_cams, tgt_cam.unsqueeze(0))
                 if self.nopts == 0:
                     print('   Initial R err: {:.3f}, T err: {:.3f}'.format(errs_R.mean(), errs_T.mean()))
                 if self.nopts == self.hpams['optimize']['num_opts'] - 1:
@@ -330,7 +309,6 @@ class OptimizerNuScenes:
                     generated_imgs = []
                     with torch.no_grad():
                         # for num, cam_id in enumerate(cam_ids):
-                        tgt_pose, roi, K = tgt_cams[0], rois[0], cam_intrinsics[0]
                         cam2opt = est_cams[0]
                         # render full image
                         generated_img = render_full_img(self.model, self.device, cam2opt, obj_sz, K, roi,
@@ -358,7 +336,7 @@ class OptimizerNuScenes:
             self.optimized_texturecodes[instoken] = texturecode.detach().cpu()
             self.optimized_ins_flag[instoken] = 1
             self.optimized_ann_flag[anntoken] = 1
-            self.log_eval_pose(est_cams, tgt_cams, batch_data['anntoken'])
+            self.log_eval_pose(est_cams, tgt_cam.unsqueeze(0), batch_data['anntoken'])
             self.save_opts_w_pose(batch_idx)
 
     def optimize_objs_multi_anns(self, save_img=True):

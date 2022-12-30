@@ -3,7 +3,7 @@
   "net_hyperparams": {
     "shape_blocks": 5,
     "texture_blocks": 5,
-    "latent_dim": 256,
+    "latent_dim": 128,
     "num_xyz_freq": 10,
     "num_dir_freq": 4
   },
@@ -11,8 +11,8 @@
     "name": "nusc",
     "nusc_cat": "vehicle.car",
     "seg_cat": "car",
-    "train_data_dir": "/data_ssd/guo1syv/Datasets/nuscenes/v1.0-trainval",
-    "train_nusc_version": "v1.0-trainval",
+    "train_data_dir": "/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini",
+    "train_nusc_version": "v1.0-mini",
     "test_data_dir": "/mnt/LinuxDataFast/Datasets/NuScenes/v1.0-mini",
     "test_nusc_version": "v1.0-mini",
     "img_h": 900,

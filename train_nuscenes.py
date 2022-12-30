@@ -44,7 +44,7 @@ if __name__ == '__main__':
         nusc_seg_dir,
         nusc_version,
         split='train',
-        num_cams_per_sample=1,
+        is_train=True,
         debug=False,
     )
 
