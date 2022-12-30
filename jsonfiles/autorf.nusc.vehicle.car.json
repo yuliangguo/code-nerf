@@ -43,7 +43,7 @@
   "euler_rot": 0,
   "optimize": {
     "num_opts": 50,
-    "opt_obj_pose": 1,
+    "opt_cam_pose": 0,
     "lr_shape": 0.02,
     "lr_texture": 0.02,
     "lr_pose": 0.01,

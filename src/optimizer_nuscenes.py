@@ -192,11 +192,11 @@ class OptimizerNuScenes:
             anntoken = batch_data['anntoken']
 
             tgt_img, tgt_cam, pred_pose, mask_occ, roi, K = \
-                imgs[0], cam_poses[0], cam_poses_w_err[0], masks_occ[0], \
+                imgs[0], cam_poses[0], obj_poses_w_err[0], masks_occ[0], \
                 rois[0], cam_intrinsics[0]
 
-            if self.hpams['optimize']['opt_obj_pose']:
-                pred_pose = obj_poses_w_err[0]
+            if self.hpams['optimize']['opt_cam_pose']:
+                pred_pose = cam_poses_w_err[0]
 
             instoken, anntoken = instoken[0], anntoken[0]
             obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']
@@ -256,7 +256,7 @@ class OptimizerNuScenes:
                 else:
                     rot_mat2opt = rot_trans.axis_angle_to_matrix(rot_vec[0])
 
-                if self.hpams['optimize']['opt_obj_pose']:
+                if not self.hpams['optimize']['opt_cam_pose']:
                     rot_mat2opt = torch.transpose(rot_mat2opt, dim0=-2, dim1=-1)
                     t2opt = -rot_mat2opt @ t2opt
 
@@ -507,10 +507,10 @@ class OptimizerNuScenes:
             obj_poses_w_err = batch_data['obj_poses_w_err']
             anntokens = batch_data['anntokens']
 
-            if self.hpams['optimize']['opt_obj_pose']:
-                pred_poses = obj_poses_w_err
-            else:
+            if self.hpams['optimize']['opt_cam_pose']:
                 pred_poses = cam_poses_w_err
+            else:
+                pred_poses = obj_poses_w_err
 
             if len(tgt_imgs) == 0:
                 continue
@@ -580,7 +580,7 @@ class OptimizerNuScenes:
                     else:
                         rot_mat2opt = rot_trans.axis_angle_to_matrix(rot_vec[num])
 
-                    if self.hpams['optimize']['opt_obj_pose']:
+                    if not self.hpams['optimize']['opt_cam_pose']:
                         rot_mat2opt = torch.transpose(rot_mat2opt, dim0=-2, dim1=-1)
                         t2opt = -rot_mat2opt @ t2opt
 
