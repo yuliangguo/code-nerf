@@ -91,7 +91,7 @@ class TrainerNuScenes:
         self.texture_codes = None
         self.instoken2idx = {}
         idx = 0
-        for ii, instoken in enumerate(self.nusc_dataset.instokens):
+        for ii, instoken in enumerate(self.nusc_dataset.anntokens_per_ins.keys()):
             if instoken not in self.instoken2idx.keys():
                 self.instoken2idx[instoken] = idx
                 idx += 1
@@ -139,14 +139,8 @@ class TrainerNuScenes:
                 rois = batch_data['rois'][obj_idx]
                 cam_intrinsics = batch_data['cam_intrinsics'][obj_idx]
                 cam_poses = batch_data['cam_poses'][obj_idx]
-                valid_flags = batch_data['valid_flags'][obj_idx]
                 instoken = batch_data['instoken'][obj_idx]
                 anntoken = batch_data['anntoken'][obj_idx]
-
-                # TODO: preprocess of the dataset to only keep the valid sample
-                # skip unqualified sample
-                if np.sum(valid_flags.numpy()) == 0:
-                    continue
 
                 # print(f'epoch: {self.nepoch}, batch: {batch_idx}/{len(self.dataloader)}, obj: {obj_idx} is qualified')
                 obj_sz = self.nusc_dataset.nusc.get('sample_annotation', anntoken)['size']

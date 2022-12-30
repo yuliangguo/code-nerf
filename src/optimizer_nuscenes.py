@@ -35,11 +35,11 @@ class OptimizerNuScenes:
         self.optimized_poses = {}
         self.optimized_ins_flag = {}
         self.optimized_ann_flag = {}
-        for ii, anntoken in enumerate(self.nusc_dataset.anntokens):
+        for ii, anntoken in enumerate(self.nusc_dataset.instoken_per_ann.keys()):
             if anntoken not in self.optimized_poses.keys():
                 self.optimized_poses[anntoken] = torch.zeros((3, 4), dtype=torch.float32)
                 self.optimized_ann_flag[anntoken] = 0
-        for ii, instoken in enumerate(self.nusc_dataset.instokens):
+        for ii, instoken in enumerate(self.nusc_dataset.anntokens_per_ins.keys()):
             if instoken not in self.optimized_shapecodes.keys():
                 self.optimized_shapecodes[instoken] = None
                 self.optimized_texturecodes[instoken] = None
@@ -366,7 +366,7 @@ class OptimizerNuScenes:
             optimize multiple annotations for the same instance in a singe iteration
         """
 
-        instokens = self.nusc_dataset.ins_ann_tokens.keys()
+        instokens = self.nusc_dataset.anntokens_per_ins.keys()
 
         # Per object
         for obj_idx, instoken in enumerate(instokens):
@@ -513,7 +513,7 @@ class OptimizerNuScenes:
             optimize multiple annotations for the same instance in a singe iteration
         """
 
-        instokens = self.nusc_dataset.ins_ann_tokens.keys()
+        instokens = self.nusc_dataset.anntokens_per_ins.keys()
         # Per object
         for obj_idx, instoken in enumerate(instokens):
             print(f'num obj: {obj_idx}/{len(instokens)}, instoken: {instoken}')

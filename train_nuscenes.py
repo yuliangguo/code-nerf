@@ -14,14 +14,14 @@ if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--gpus", dest="gpus", type=int, default=4,
                             help='Number of GPUs to use')
-    arg_parser.add_argument("--config_file", dest="config_file", default="jsonfiles/codenerf.nusc.vehicle.car.json")
+    arg_parser.add_argument("--config_file", dest="config_file", default="jsonfiles/autorf.nusc.vehicle.car.json")
     arg_parser.add_argument("--seg_source", dest="seg_source",
                             default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--pretrained_model_dir", dest="pretrained_model_dir", default=None,
                             help="location of saved pretrained model and codes")
     arg_parser.add_argument("--batch_size", dest="batch_size", type=int, default=24)
-    arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=4)
+    arg_parser.add_argument("--num_workers", dest="num_workers", type=int, default=16)
     arg_parser.add_argument("--epochs", dest="epochs", default=20)
     arg_parser.add_argument("--resume_from_epoch", dest="resume_from_epoch", default=None)
     args = arg_parser.parse_args()
