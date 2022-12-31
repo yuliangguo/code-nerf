@@ -13,7 +13,7 @@ from src.data_nuscenes import NuScenesData
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--gpu", dest="gpu", type=int, default=0)
-    arg_parser.add_argument("--config_file", dest="config_file", default="exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize6_2022_12_02/hpam.json")
+    arg_parser.add_argument("--config_file", dest="config_file", default="exps_nuscenes_autorf/vehicle.car.v1.0-trainval.use_instance.bsize24_2022_12_30/hpam.json")
     arg_parser.add_argument("--seg_source", dest="seg_source", default='instance',
                             help="use predicted instance/panoptic segmentation on nuscenes dataset")
     arg_parser.add_argument("--save_img", dest="save_img", default=False)

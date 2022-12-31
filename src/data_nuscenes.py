@@ -555,7 +555,8 @@ class NuScenesData:
         sample_data['instoken'] = self.instoken_per_ann[anntoken]
         sample_data['anntoken'] = anntoken
 
-        # TODO: if training, prepare batch data including ray based samples to further improve efficiency
+        # TODO: if training, prepare batch data including ray based samples.
+        #  It will further improve efficiency, but lower flexible for training considering different crop sizes
 
         return sample_data
 
