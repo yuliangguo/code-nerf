@@ -147,7 +147,7 @@ def volume_rendering_batch(sigmas, rgbs, z_vals):
 
 def prepare_pixel_samples(img, mask_occ, cam_pose, obj_diag, K, roi, n_rays, n_samples, shapenet_obj_cood, sym_aug):
     """
-        Prepare pixel-sampled data from input image
+        Prepare pixel-sampled data from input image, only one img as input
     """
     # near and far sample range need to be adaptively calculated
     near = np.linalg.norm(cam_pose[:, -1].tolist()) - obj_diag / 2

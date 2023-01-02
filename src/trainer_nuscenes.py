@@ -3,11 +3,12 @@ import os
 import time
 import json
 import math
+import cv2
+import random
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-import cv2
 
 from utils import image_float_to_uint8, render_full_img, prepare_pixel_samples, volume_rendering_batch, preprocess_img_square, preprocess_img_keepratio
 from model_autorf import AutoRF
@@ -29,7 +30,8 @@ class ParallelModel(nn.Module):
                 z_vals_batch,
                 rgb_tgt_batch,
                 occ_pixels_batch):
-        if self.hpams['arch'] == 'autorf':
+        if self.hpams['arch'] == 'autorf' and random.uniform(0, 1) > 0.7:
+            # trigger encoder by chance is key to benefit from multi-view for training decoder toward complete shape
             shapecode, texturecode = self.model.encode_img(img_in_batch)
             # Under this way, model output can be assigned to original saved code without break the reference
             shapecode_batch.data = shapecode.data
@@ -234,6 +236,7 @@ class TrainerNuScenes:
             self.niter += 1
 
     def log_losses(self, loss_rgb, loss_occ, loss_reg, loss_total, time_spent):
+        # TODO: psnr need to ignore the background
         psnr = -10 * np.log(loss_rgb) / np.log(10)
         self.writer.add_scalar('psnr/train', psnr, self.niter)
         self.writer.add_scalar('loss_rgb/train', loss_rgb, self.niter)
